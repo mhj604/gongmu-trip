@@ -89,7 +89,8 @@ def export_excel(result:Result)->bytes:
     # 최종액은 캐시 지원 여부에 관계없이 표시되는 숫자 값으로 기록한다.
     extras=[('기지급액',result.advance),(status_label(result),result.claim),('반납예정액',result.refund),
             ('출장명',result.trip['meta'].get('출장명','')),('출장자',result.trip['meta'].get('성명','')),
-            ('생성일시',result.generated_at),('법령 자료 버전',result.rule_snapshot['version'])]
+            ('생성일시',result.generated_at),('법령 자료 버전',result.rule_snapshot['version']),
+            ('예상 출장비 (미확정 포함)',result.estimated)]
     for key,val in extras:
         i=ws.max_row+1
         safe_value(ws.cell(i,1),key); safe_value(ws.cell(i,4),val)

@@ -15,6 +15,12 @@ def local_trip(ctx,day):
             return None,'통합특별시는 종전 광주·전남 시군을 입력해야 합니다.'
         same=m['종전 근무지 시군']==day['종전 출장지 시군']
     distance=day.get('왕복거리(km)')
+    # 간편 화면의 명시적인 구간 선택. 정확한 거리를 임의로 만들어 저장하지 않는다.
+    if (distance in ('',None) and not same and
+            day.get('거리구간확인')=='다른 시군·왕복 12km 이상' and
+            not m.get('통합특별시 해당') and not day.get('분리도서') and
+            day.get('근무지 판정','자동')=='자동'):
+        return False,'사용자 구간 확인: 다른 시군·왕복 12km 이상; 제18조 및 지침 Ⅲ'
     if distance in ('',None) and not same: return None,'다른 시군 출장의 왕복거리 미입력'
     if distance not in ('',None) and not day.get('거리출처'): return None,'왕복거리 산출 출처 미입력'
     classified=same or (distance not in ('',None) and dec(distance)<12)

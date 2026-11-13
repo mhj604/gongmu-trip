@@ -69,6 +69,7 @@ def export_word(result:Result)->bytes:
     foot.add_run('페이지 ')
     field=OxmlElement('w:fldSimple');field.set(qn('w:instr'),'PAGE');foot._p.append(field)
     doc.add_paragraph(result.trip['kind']+' 출장비 정산서','Title')
+    doc.add_paragraph('예상 출장비 (미확정 포함)  '+money(result.estimated))
     p=doc.add_paragraph(status_label(result)+'  ')
     r=p.add_run(money(result.claim));r.bold=True;r.font.size=Pt(19);r.font.color.rgb=RGBColor.from_string(TEAL)
     doc.add_paragraph(f'확정 인정액 {money(result.recognized)}  ·  기지급액 {money(result.advance)}  ·  반납예정액 {money(result.refund)}')

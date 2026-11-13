@@ -100,6 +100,11 @@ class Result:
         return sum((x.amount or ZERO for x in self.lines if x.status not in (CONFIRMED,EXCLUDED)),ZERO)
 
     @property
+    def estimated(self):
+        """입력 조건으로 산출 가능한 참고액. 승인·증빙 확정액과 구분한다."""
+        return self.recognized+self.pending
+
+    @property
     def advance(self):
         return dec(self.trip['meta'].get('기지급액'))
 
