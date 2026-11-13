@@ -1,0 +1,9 @@
+[project]
+name = "gongmu-trip"
+version = "0.1.0"
+description = "국가공무원 국내·국외 출장비 계산 및 한글 Excel·Word 정산서"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
