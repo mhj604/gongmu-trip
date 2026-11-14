@@ -25,20 +25,25 @@ def transport(ctx,row):
     if mode=='자가용':
         if row.get('동승자'):
             amount=ZERO; status=EXCLUDED; notes+='; 동승자는 운임 제외'
-        elif row.get('부득이한사유'):
+        elif (row.get('자가용정산방식')=='연료비' or
+              (not row.get('자가용정산방식') and row.get('부득이한사유'))):
             efficiency=dec(ctx.rules['fuel_efficiency'].get(row.get('유종','휘발유'),'0'))
             if not efficiency or row.get('유가') in ('',None) or row.get('거리(km)') in ('',None):
                 status=REVIEW; amount=None
+                notes+='; 유종·주행거리·연료 단가 입력 필요'
             else:
                 amount=dec(row.get('거리(km)'))*dec(row.get('유가'))/efficiency+dec(row.get('통행료'))+dec(row.get('주차료'))
                 amount=net(row,amount)
                 formula=f'거리 {row.get("거리(km)")} × 단위가격 {row.get("유가")} ÷ 법정연비 {efficiency} + 통행료 + 주차료 - 지원'
                 status=receipt_status(row,True)
                 if not row.get('거리출처') or not row.get('유가출처'): status=REVIEW
+                if not row.get('부득이한사유'):
+                    status=REVIEW; notes+='; 부득이한 자가용 사용 사유 미입력'
         else:
-            amount=net(row,dec(row.get('대중교통운임')))
+            amount=None if row.get('대중교통운임') in ('',None) else net(row,dec(row.get('대중교통운임')))
             formula='같은 구간 법정 좌석의 철도·버스 운임 - 지원액'
-            if row.get('대중교통운임') in ('',None) or not row.get('운임출처'): status=REVIEW
+            if row.get('대중교통운임') in ('',None) or not row.get('운임출처'):
+                status=REVIEW; notes+='; 같은 구간 철도·버스 운임 및 출처 입력 필요'
     if mode=='항공':
         allowed='일등석' if group=='제1호가' else '비즈니스' if group.startswith('제1호') else '이코노미'
         seat=row.get('좌석등급','이코노미')

@@ -33,6 +33,7 @@ TRANSPORT={'일자':'','교통수단':'철도','출발지':'','도착지':'','�
            '할인액':'','기관부담액':'','지원액':'','기관직접결제':False,'증빙확인':False,'승인':False,'승인근거':'',
            '대중교통운임':'','운임출처':'','부득이한사유':'','거리(km)':'','거리출처':'','유종':'휘발유','유가':'',
            '유가출처':'','통행료':'','주차료':'','동승자':False,'마일리지처리':'사용 없음','환율ID':''}
+TRANSPORT['자가용정산방식']=''
 SPECIAL={'일자':'','종류':'비자발급비','실제지출액':'','통화':'KRW','할인액':'','기관부담액':'','지원액':'',
          '증빙확인':False,'승인':False,'승인근거':'','출입국필수':False,'화물량':'','기본구간실비':'','초과구간실비':'',
          '이전요건확인':False,'발령일':'','이전일':'','나이':'','관계':'배우자','독립생계':False,'자녀예외확인':False,
@@ -58,6 +59,10 @@ def default_trip(store):
 # 표의 원본은 편집 시작 때 한 번만 만든다. Enter 후 같은 원본에 편집 패치를 적용한다.
 def editor(trip, attr, template, visible):
     baseline_key = key(trip, attr+'_baseline')
+    # 실행 중 앱이 갱신되어 열이 추가된 경우에만 기존 입력으로 기준표를 갱신한다.
+    if baseline_key in st.session_state and not set(template).issubset(st.session_state[baseline_key].columns):
+        st.session_state.pop(baseline_key, None)
+        st.session_state.pop(key(trip, attr+'_editor'), None)
     if baseline_key not in st.session_state:
         source = getattr(trip, attr)
         columns = list(dict.fromkeys([*template, *[k for row in source for k in row]]))
@@ -88,10 +93,11 @@ def editor(trip, attr, template, visible):
         else:
             configs[column] = st.column_config.TextColumn(column, default=str(template.get(column, '')))
     selections = {'지역구분': ['서울','광역시','기타'], '교통수단': ['철도','버스','항공','선박','자가용','공무용차량','무료교통','택시','기타'],
-                  '결제수단': ['개인카드','현금','국내원화예약']}
+                  '결제수단': ['개인카드','현금','국내원화예약'],
+                  '자가용정산방식':['','대중교통 운임','연료비'], '유종':list(load_rules()['fuel_efficiency'])}
     for column, options in selections.items():
         if column in configs:
-            configs[column] = st.column_config.SelectboxColumn(column, options=options, default=template.get(column) or options[0])
+            configs[column] = st.column_config.SelectboxColumn(column, options=options, default=template.get(column, options[0]))
     data = st.data_editor(frame, num_rows='dynamic', hide_index=True, width='stretch',
                           column_config=configs, column_order=visible,
                           key=key(trip, attr+'_editor'), height=280)
@@ -157,6 +163,7 @@ def quick_fields(trip, nights):
             select(trip, '간편출장범위', '출장 범위', ['근무지 외','근무지 내'])
         st.caption('근무지 외: 다른 시·군이며 왕복 12km 이상. 같은 시·군 또는 왕복 12km 미만은 근무지 내를 선택하세요.')
     local = trip.kind == '국내' and trip.meta.get('간편출장범위') == '근무지 내'
+    mode = select(trip,'간편교통수단','교통수단',['철도','버스','항공','선박','자가용'])
     if local:
         a, b = st.columns(2)
         with a:
@@ -177,9 +184,44 @@ def quick_fields(trip, nights):
             else:
                 st.caption('당일 출장 · 숙박비 없음')
         with b:
-            number(trip, '간편교통비', '왕복 교통비 합계 (원)')
+            if mode != '자가용':
+                number(trip, '간편교통비', '왕복 교통비 합계 (원)')
+        if mode == '자가용':
+            car_fields(trip)
         if trip.kind == '국외':
             st.caption('숙박·교통비는 원화 결제액을 입력하세요. 외화·카드 상세 정산은 날짜별 입력에서 가능합니다.')
+    if local and mode == '자가용':
+        st.caption('근무지 내 출장은 시간·거리 기준의 여비를 적용하며 자가용 연료비를 별도로 더하지 않습니다.')
+
+
+def car_fields(trip):
+    method = select(trip,'간편자가용방식','자가용 계산 방식',['대중교통 운임','연료비'])
+    if method == '대중교통 운임':
+        number(trip,'간편대중교통운임','같은 구간 철도·버스 왕복 운임 (원)',None)
+        st.caption('일반적인 자가용 출장은 같은 구간의 철도·버스 운임을 기준으로 계산합니다.')
+    else:
+        a, b = st.columns(2)
+        with a:
+            number(trip,'간편주행거리','총 주행거리 · 왕복 합계 (km)',None)
+            fuel = select(trip,'간편유종','유종',list(load_rules()['fuel_efficiency']))
+        with b:
+            unit = 'kWh' if fuel in ['전기','플러그인하이브리드(전기)'] else 'kg' if fuel == '수소' else 'L'
+            number(trip,'간편유가',f'연료 단가 (원/{unit})',None)
+            number(trip,'간편통행료','통행료 합계 (원)')
+        number(trip,'간편주차료','주차료 합계 (원)')
+        efficiency = load_rules()['fuel_efficiency'][fuel]
+        st.caption(f'주행거리 × 연료 단가 ÷ 기준 연비 {efficiency} km/{unit} + 통행료 + 주차료. 부득이한 자가용 사용에 대한 승인 대상입니다.')
+    with st.expander('자가용 증빙·승인 정보 · 선택 입력'):
+        trip.meta['간편동승자'] = st.checkbox('동승자 (자가용 운임 제외)',value=trip.meta.get('간편동승자',False),key=key(trip,'car_passenger'))
+        if method == '대중교통 운임':
+            text(trip,'간편운임출처','철도·버스 운임 출처')
+        else:
+            text(trip,'간편자가용사유','부득이한 자가용 사용 사유')
+            text(trip,'간편거리출처','거리 출처')
+            text(trip,'간편유가출처','연료 단가 출처')
+            trip.meta['간편자가용승인'] = st.checkbox('자가용 사용 승인 완료',value=trip.meta.get('간편자가용승인',False),key=key(trip,'car_approved'))
+            text(trip,'간편자가용승인근거','자가용 승인 근거')
+        trip.meta['간편자가용증빙'] = st.checkbox('자가용 이용·지출 증빙 확인',value=trip.meta.get('간편자가용증빙',False),key=key(trip,'car_evidence'))
 
 
 def detail_fields(trip):
@@ -192,7 +234,13 @@ def detail_fields(trip):
     with tabs[1]:
         editor(trip,'lodgings',LODGING,['숙박일','국가','도시','지역구분','실제숙박','실제지출액','통화','결제수단','카드청구원화액','1USD당현지통화','현지환율기준일','현지환율출처','현금사용사유','무료숙박','증빙확인'])
     with tabs[2]:
-        editor(trip,'transports',TRANSPORT,['일자','교통수단','출발지','도착지','좌석등급','실제지출액','통화','기관직접결제','증빙확인'])
+        car_columns = st.toggle('자가용 입력란 표시',value=any(r.get('교통수단')=='자가용' for r in trip.transports),key=key(trip,'car_columns'))
+        visible = ['일자','교통수단','출발지','도착지','좌석등급','실제지출액','통화','기관직접결제','증빙확인']
+        if car_columns:
+            visible += ['자가용정산방식','대중교통운임','운임출처','거리(km)','거리출처','유종','유가','유가출처','통행료','주차료','부득이한사유','승인','승인근거','동승자']
+        editor(trip,'transports',TRANSPORT,visible)
+        if car_columns:
+            st.caption('자가용은 대중교통 운임 또는 연료비 방식을 선택하세요. 거리·통행료·주차료는 해당 행 이동 구간의 합계입니다. 실제지출액을 연료비에 중복 합산하지 않습니다.')
     with tabs[3]:
         editor(trip,'evidence',EVIDENCE_ROW,list(EVIDENCE_ROW))
     if trip.kind == '국외':
@@ -260,8 +308,6 @@ def run():
         with st.expander('추가 옵션'):
             select(trip,'지급등급','지급 등급',GROUPS)
             trip.meta['간편공용차량'] = st.checkbox('공무용 차량 이용', value=trip.meta.get('간편공용차량',False),key=key(trip,'vehicle'))
-            if not previous:
-                select(trip,'간편교통수단','교통수단',['철도','버스','항공','선박'])
             number(trip,'기지급액','이미 받은 금액 (원)')
         manual = manual_container.toggle('날짜별로 다르게 입력',value=previous,key=key(trip,'manual'),help='여러 출장지·일부 숙박·무료 제공·상세 증빙이 있을 때 사용하세요. 해제하면 간편 입력 합계로 다시 계산합니다.')
         if manual != previous:

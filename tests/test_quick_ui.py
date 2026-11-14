@@ -78,3 +78,58 @@ def test_enter_edits_survive_second_edit_and_unrelated_rerun():
     assert rows[2]['실제지출액'] == '1234.0'
     assert rows[2]['실제숙박'] is True
     assert app.dataframe[1].proto.id == identities[1]
+
+
+def test_car_fare_and_fuel_use_their_own_fields_and_keep_totals():
+    trip = quick_trip()
+    trip.meta.update({'간편교통수단':'자가용','간편자가용방식':'대중교통 운임',
+                      '간편대중교통운임':'14000','간편운임출처':'철도 운임표'})
+    build_schedule(trip)
+    result = calculate_preview(trip)
+    assert sum((r.amount or ZERO for r in result.lines if r.category=='교통비'),ZERO) == 14000
+    # 기존 왕복 교통비 50,000원에 연료비를 중복 합산하지 않는다.
+    trip.meta.update({'간편자가용방식':'연료비','간편주행거리':'119.7',
+                      '간편유종':'휘발유','간편유가':'1700','간편통행료':'5000','간편주차료':'3000'})
+    build_schedule(trip)
+    result = calculate_preview(trip)
+    car = next(r for r in result.lines if r.category=='교통비')
+    assert car.amount == 25000 and car.status != '계산 확정'
+    assert '11.97' in car.formula
+    trip.meta['간편동승자'] = True
+    build_schedule(trip)
+    car = next(r for r in calculate_preview(trip).lines if r.category=='교통비')
+    assert car.amount == 0 and car.status == '지급 제외'
+
+
+def test_car_missing_inputs_stay_unknown_and_local_fuel_is_not_added():
+    trip = quick_trip()
+    trip.meta.update({'간편교통수단':'자가용','간편자가용방식':'대중교통 운임'})
+    build_schedule(trip)
+    car = next(r for r in calculate_preview(trip).lines if r.category=='교통비')
+    assert car.amount is None
+    trip.meta.update({'간편자가용방식':'연료비','간편주행거리':'119.7'})
+    build_schedule(trip)
+    car = next(r for r in calculate_preview(trip).lines if r.category=='교통비')
+    assert car.amount is None
+    trip.meta.update({'간편출장범위':'근무지 내','간편거리':'10','간편시간':'4',
+                      '간편유가':'1700','간편통행료':'5000'})
+    build_schedule(trip)
+    assert trip.transports == []
+    assert calculate_preview(trip).estimated == 80000
+
+
+def test_quick_car_inputs_reach_calculation_without_opening_detail_table():
+    app = AppTest.from_file(Path(__file__).resolve().parents[1]/'app.py', default_timeout=20).run()
+    next(s for s in app.selectbox if s.label=='교통수단').select('자가용').run()
+    assert not app.exception
+    next(s for s in app.selectbox if s.label=='자가용 계산 방식').select('연료비').run()
+    for label, value in [('총 주행거리 · 왕복 합계 (km)',119.7),('연료 단가 (원/L)',1700.),
+                         ('통행료 합계 (원)',5000.),('주차료 합계 (원)',3000.)]:
+        next(n for n in app.number_input if n.label==label).set_value(value).run()
+    assert not app.exception
+    result = app.session_state.current_result
+    assert next(r for r in result.lines if r.category=='교통비').amount == 25000
+    app.toggle[0].set_value(True).run()
+    assert not app.exception
+    assert any(t.label=='자가용 입력란 표시' and t.value for t in app.toggle)
+    assert next(r for r in app.session_state.current_result.lines if r.category=='교통비').amount == 25000
