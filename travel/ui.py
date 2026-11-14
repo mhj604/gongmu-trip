@@ -13,6 +13,7 @@ from .storage import Store
 from .excel import export_excel
 from .word import export_word
 from .quick import build_schedule, calculate_preview
+from .fuel_prices import FuelQuote, FuelPriceError, fetch_quote, product_for, apply_quote
 from .ui_theme import apply_theme
 
 GROUPS=['제2호','제1호라','제1호다','제1호나','제1호가']
@@ -204,9 +205,11 @@ def car_fields(trip):
         with a:
             number(trip,'간편주행거리','총 주행거리 · 왕복 합계 (km)',None)
             fuel = select(trip,'간편유종','유종',list(load_rules()['fuel_efficiency']))
+            if fuel in ('하이브리드','플러그인하이브리드(연료)'):
+                select(trip,'간편가격유종','사용 연료',['보통휘발유','자동차용경유'])
         with b:
             unit = 'kWh' if fuel in ['전기','플러그인하이브리드(전기)'] else 'kg' if fuel == '수소' else 'L'
-            number(trip,'간편유가',f'연료 단가 (원/{unit})',None)
+            fuel_price_field(trip,fuel,unit)
             number(trip,'간편통행료','통행료 합계 (원)')
         number(trip,'간편주차료','주차료 합계 (원)')
         efficiency = load_rules()['fuel_efficiency'][fuel]
@@ -218,10 +221,67 @@ def car_fields(trip):
         else:
             text(trip,'간편자가용사유','부득이한 자가용 사용 사유')
             text(trip,'간편거리출처','거리 출처')
-            text(trip,'간편유가출처','연료 단가 출처')
+            if trip.meta.get('간편유가자동'):
+                st.caption(trip.meta.get('간편유가출처') or '유가 조회가 완료되면 출처가 자동 기록됩니다.')
+            else:
+                text(trip,'간편유가출처','연료 단가 출처')
             trip.meta['간편자가용승인'] = st.checkbox('자가용 사용 승인 완료',value=trip.meta.get('간편자가용승인',False),key=key(trip,'car_approved'))
             text(trip,'간편자가용승인근거','자가용 승인 근거')
         trip.meta['간편자가용증빙'] = st.checkbox('자가용 이용·지출 증빙 확인',value=trip.meta.get('간편자가용증빙',False),key=key(trip,'car_evidence'))
+
+
+@st.cache_data(ttl=900, max_entries=512, show_spinner=False)
+def lookup_oil_price(day, product):
+    try:
+        return fetch_quote(day,product), ''
+    except FuelPriceError as error:
+        return None, str(error)
+
+
+def fuel_price_field(trip, fuel, unit):
+    m = trip.meta
+    day = m['시작일시'][:10]
+    product = product_for(fuel,m.get('간편가격유종','보통휘발유'))
+    previous_auto = m.get('간편유가자동',False)
+    direct = st.toggle('연료 단가 직접 입력', value=m.get('간편유가직접입력',False),
+                       key=key(trip,'fuel_manual')) if product else True
+    if product:
+        m['간편유가직접입력'] = direct
+    m['간편유가자동'] = bool(product and not direct)
+    context = [day,fuel,product]
+    previous_context = m.get('_유가입력조건')
+    m['_유가입력조건'] = context
+    if not m['간편유가자동'] and previous_context and previous_context != context:
+        apply_quote(m,day,product,None)
+        st.session_state.pop(key(trip,'간편유가'),None)
+        st.session_state.pop(key(trip,'간편유가출처'),None)
+    if not m['간편유가자동']:
+        if previous_auto:
+            # 직접 수정한 단가에 자동 조회 출처를 붙이지 않는다.
+            m['간편유가조회'] = {}
+            m['간편유가출처'] = ''
+            m['간편유가기준일'] = ''
+            st.session_state.pop(key(trip,'간편유가출처'),None)
+        number(trip,'간편유가',f'연료 단가 (원/{unit})',None)
+        st.caption('직접 입력한 단가를 사용합니다.' if product else '전기·수소의 과거 단가는 자동 조회를 지원하지 않습니다. 해당 기준일의 단가를 직접 입력하세요.')
+        return
+    stored = m.get('간편유가조회',{})
+    if (st.session_state.get('original_rules') and stored.get('day')==day and
+            stored.get('product')==product and stored.get('price')):
+        quote, error = FuelQuote(**stored), ''
+    else:
+        quote, error = lookup_oil_price(day,product)
+    apply_quote(m,day,product,quote)
+    value = format(dec(quote.price).normalize(),'f') if quote else ''
+    st.text_input(f'연료 단가 · 자동 (원/{unit})',value=value,disabled=True,
+                  placeholder='해당 날짜 유가 조회 불가',key=key(trip,'fuel_auto_'+day+'_'+product+'_'+value))
+    if quote:
+        st.caption(f'{day} · {product} · 전국 평균판매가격 · [오피넷(한국석유공사)]({quote.source})')
+    else:
+        st.warning(error)
+        if st.button('유가 다시 조회',key=key(trip,'fuel_retry')):
+            lookup_oil_price.clear(day,product)
+            st.rerun()
 
 
 def detail_fields(trip):
