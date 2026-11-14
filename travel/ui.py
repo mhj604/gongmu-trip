@@ -89,7 +89,7 @@ def editor(trip, attr, template, visible):
         if pd.api.types.is_bool_dtype(frame[column]):
             configs[column] = st.column_config.CheckboxColumn(column, default=template.get(column, False))
         elif pd.api.types.is_numeric_dtype(frame[column]):
-            configs[column] = st.column_config.NumberColumn(column, min_value=0, step=.01)
+            configs[column] = st.column_config.NumberColumn(column, min_value=0, step=.01, format='%.15g')
         else:
             configs[column] = st.column_config.TextColumn(column, default=str(template.get(column, '')))
     selections = {'지역구분': ['서울','광역시','기타'], '교통수단': ['철도','버스','항공','선박','자가용','공무용차량','무료교통','택시','기타'],
@@ -129,7 +129,7 @@ def select(trip, name, label, options):
 def number(trip, name, label, default=0, help=None):
     value = trip.meta.get(name, default)
     value = None if value in ('', None) else float(value)
-    answer = st.number_input(label, min_value=0., value=value, step=1., key=key(trip, name), help=help)
+    answer = st.number_input(label, min_value=0., value=value, step=1., format='%.15g', key=key(trip, name), help=help)
     trip.meta[name] = '' if answer is None else str(answer)
     return answer
 
