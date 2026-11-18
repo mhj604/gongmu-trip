@@ -33,8 +33,8 @@ def build_schedule(trip):
                       '통화': 'KRW', '결제수단': '국내원화예약', '증빙확인': False,
                       '입력방식': '출장 전체 숙박비 합계',
                       '배분설명': '계산을 위한 균등배분. 일별 실제 지출은 상세 입력에서 작성.'}
-                     for i in range(nights)] if total else []
-    fare = dec(m.get('간편교통비'))
+                     for i in range(nights)] if total and not local else []
+    fare = ZERO if m.get('간편교통수단') == '없음' else dec(m.get('간편교통비'))
     trip.transports = [{'일자': str(start), '교통수단': m.get('간편교통수단', '철도'),
                         '좌석등급': '이코노미' if m.get('간편교통수단') == '항공' else '일반실',
                         '도착지': place['도시'], '실제지출액': str(fare), '통화': 'KRW',

@@ -121,9 +121,9 @@ def text(trip, name, label=None):
     trip.meta[name] = st.text_input(label or name, value=str(trip.meta.get(name, '')), key=key(trip, name))
 
 
-def select(trip, name, label, options):
+def select(trip, name, label, options, help=None):
     value = trip.meta.get(name, options[0])
-    trip.meta[name] = st.selectbox(label, options, index=options.index(value) if value in options else 0, key=key(trip, name))
+    trip.meta[name] = st.selectbox(label, options, index=options.index(value) if value in options else 0, key=key(trip, name), help=help)
     return trip.meta[name]
 
 
@@ -155,79 +155,94 @@ def quick_fields(trip, nights):
             select(trip, '기본국가', '방문 국가', ['']+sorted(set(load_rules()['countries']) | {'싱가포르'}))
         with b:
             text(trip, '기본도시', '방문 도시')
-        number(trip, '간편환율', '환율 · 1 USD당 원화', None, '직접 입력한 환율로 예상 금액을 계산합니다.')
+        a, b = st.columns(2)
+        with a:
+            payment_group(trip)
+        with b:
+            number(trip, '간편환율', '환율 · 1 USD당 원화', None, '직접 입력한 환율로 예상 금액을 계산합니다.')
     else:
         a, b = st.columns(2)
         with a:
-            select(trip, '간편지역', '출장지', ['기타','서울','광역시'])
+            select(trip, '간편출장범위', '출장 범위', ['근무지 외','근무지 내'],
+                   help='다른 시·군이며 왕복 12km 이상이면 근무지 외, 같은 시·군이거나 왕복 12km 미만이면 근무지 내를 선택하세요.')
         with b:
-            select(trip, '간편출장범위', '출장 범위', ['근무지 외','근무지 내'])
-        st.caption('근무지 외: 다른 시·군이며 왕복 12km 이상. 같은 시·군 또는 왕복 12km 미만은 근무지 내를 선택하세요.')
+            payment_group(trip)
     local = trip.kind == '국내' and trip.meta.get('간편출장범위') == '근무지 내'
-    mode = select(trip,'간편교통수단','교통수단',['철도','버스','항공','선박','자가용'])
     if local:
         a, b = st.columns(2)
         with a:
             number(trip, '간편시간', '하루 출장시간 (시간)', None)
         with b:
             number(trip, '간편거리', '왕복거리 (km)', None)
-        if dec(trip.meta.get('간편거리')) <= 2:
+        if trip.meta.get('간편거리') not in ('',None) and dec(trip.meta['간편거리']) <= 2:
             a, b = st.columns(2)
             with a:
                 number(trip, '간편교통비', '하루 실제 교통비 (원)')
             with b:
                 number(trip, '간편근거리식비', '하루 실제 식비 (원)')
-    else:
+        return
+    if nights > 0:
         a, b = st.columns(2)
         with a:
-            if nights > 0:
-                number(trip, '간편숙박비', f'숙박비 합계 · {nights}박 (원)', help='무료 숙박은 0원. 여러 지역·일부 숙박은 날짜별 입력을 사용하세요.')
-            else:
-                st.caption('당일 출장 · 숙박비 없음')
+            number(trip, '간편숙박비', f'숙박비 합계 · {nights}박 (원)', help='출장 전체 합계. 무료 숙박은 0원입니다. 일부 날짜만 숙박하거나 지역이 다르면 상세 입력을 사용하세요.')
         with b:
-            if mode != '자가용':
-                number(trip, '간편교통비', '왕복 교통비 합계 (원)')
-        if mode == '자가용':
-            car_fields(trip)
-        if trip.kind == '국외':
-            st.caption('숙박·교통비는 원화 결제액을 입력하세요. 외화·카드 상세 정산은 날짜별 입력에서 가능합니다.')
-    if local and mode == '자가용':
-        st.caption('근무지 내 출장은 시간·거리 기준의 여비를 적용하며 자가용 연료비를 별도로 더하지 않습니다.')
+            if trip.kind == '국내':
+                select(trip, '간편지역', '숙박 지역', ['기타','서울','광역시'])
+    a, b = st.columns(2)
+    with a:
+        mode = select(trip,'간편교통수단','교통수단',['철도','버스','항공','선박','자가용','없음'])
+    with b:
+        if mode not in ('자가용','없음'):
+            number(trip, '간편교통비', '왕복 교통비 합계 (원)')
+    if mode == '자가용':
+        car_fields(trip)
+    if trip.kind == '국외':
+        st.caption('숙박·교통비는 원화 합계로 입력하세요.')
+
+
+def payment_group(trip):
+    select(trip,'지급등급','지급 등급',GROUPS,
+           help='일반 공무원은 보통 제2호입니다. 본인 직위에 해당하는 등급은 공무원 여비 규정 별표 1과 소속기관 기준을 확인하세요.')
 
 
 def car_fields(trip):
-    method = select(trip,'간편자가용방식','자가용 계산 방식',['대중교통 운임','연료비'])
-    if method == '대중교통 운임':
-        number(trip,'간편대중교통운임','같은 구간 철도·버스 왕복 운임 (원)',None)
-        st.caption('일반적인 자가용 출장은 같은 구간의 철도·버스 운임을 기준으로 계산합니다.')
-    else:
+    a, b = st.columns(2)
+    with a:
+        method = select(trip,'간편자가용방식','자가용 계산 방식',['대중교통 운임','연료비'],
+                        help='일반적인 자가용 출장은 같은 구간의 철도·버스 운임 기준입니다. 부득이한 자가용 사용으로 연료비를 정산하는 경우 연료비를 선택하세요.')
+    with b:
+        if method == '대중교통 운임':
+            number(trip,'간편대중교통운임','같은 구간 철도·버스 왕복 운임 (원)',None)
+        else:
+            number(trip,'간편주행거리','총 주행거리 · 왕복 합계 (km)',None)
+    if method == '연료비':
         a, b = st.columns(2)
         with a:
-            number(trip,'간편주행거리','총 주행거리 · 왕복 합계 (km)',None)
             fuel = select(trip,'간편유종','유종',list(load_rules()['fuel_efficiency']))
             if fuel in ('하이브리드','플러그인하이브리드(연료)'):
                 select(trip,'간편가격유종','사용 연료',['보통휘발유','자동차용경유'])
         with b:
             unit = 'kWh' if fuel in ['전기','플러그인하이브리드(전기)'] else 'kg' if fuel == '수소' else 'L'
             fuel_price_field(trip,fuel,unit)
+        with st.popover('통행료·주차료 (선택)',width='stretch'):
             number(trip,'간편통행료','통행료 합계 (원)')
-        number(trip,'간편주차료','주차료 합계 (원)')
-        efficiency = load_rules()['fuel_efficiency'][fuel]
-        st.caption(f'주행거리 × 연료 단가 ÷ 기준 연비 {efficiency} km/{unit} + 통행료 + 주차료. 부득이한 자가용 사용에 대한 승인 대상입니다.')
-    with st.expander('자가용 증빙·승인 정보 · 선택 입력'):
-        trip.meta['간편동승자'] = st.checkbox('동승자 (자가용 운임 제외)',value=trip.meta.get('간편동승자',False),key=key(trip,'car_passenger'))
-        if method == '대중교통 운임':
-            text(trip,'간편운임출처','철도·버스 운임 출처')
+            number(trip,'간편주차료','주차료 합계 (원)')
+
+
+def car_evidence_fields(trip):
+    trip.meta['간편동승자'] = st.checkbox('동승자 (자가용 운임 제외)',value=trip.meta.get('간편동승자',False),key=key(trip,'car_passenger'))
+    if trip.meta.get('간편자가용방식','대중교통 운임') == '대중교통 운임':
+        text(trip,'간편운임출처','철도·버스 운임 출처')
+    else:
+        text(trip,'간편자가용사유','부득이한 자가용 사용 사유')
+        text(trip,'간편거리출처','거리 출처')
+        if trip.meta.get('간편유가자동'):
+            st.caption(trip.meta.get('간편유가출처') or '유가 조회가 완료되면 출처가 자동 기록됩니다.')
         else:
-            text(trip,'간편자가용사유','부득이한 자가용 사용 사유')
-            text(trip,'간편거리출처','거리 출처')
-            if trip.meta.get('간편유가자동'):
-                st.caption(trip.meta.get('간편유가출처') or '유가 조회가 완료되면 출처가 자동 기록됩니다.')
-            else:
-                text(trip,'간편유가출처','연료 단가 출처')
-            trip.meta['간편자가용승인'] = st.checkbox('자가용 사용 승인 완료',value=trip.meta.get('간편자가용승인',False),key=key(trip,'car_approved'))
-            text(trip,'간편자가용승인근거','자가용 승인 근거')
-        trip.meta['간편자가용증빙'] = st.checkbox('자가용 이용·지출 증빙 확인',value=trip.meta.get('간편자가용증빙',False),key=key(trip,'car_evidence'))
+            text(trip,'간편유가출처','연료 단가 출처')
+        trip.meta['간편자가용승인'] = st.checkbox('자가용 사용 승인 완료',value=trip.meta.get('간편자가용승인',False),key=key(trip,'car_approved'))
+        text(trip,'간편자가용승인근거','자가용 승인 근거')
+    trip.meta['간편자가용증빙'] = st.checkbox('자가용 이용·지출 증빙 확인',value=trip.meta.get('간편자가용증빙',False),key=key(trip,'car_evidence'))
 
 
 @st.cache_data(ttl=900, max_entries=512, show_spinner=False)
@@ -243,8 +258,11 @@ def fuel_price_field(trip, fuel, unit):
     day = m['시작일시'][:10]
     product = product_for(fuel,m.get('간편가격유종','보통휘발유'))
     previous_auto = m.get('간편유가자동',False)
-    direct = st.toggle('연료 단가 직접 입력', value=m.get('간편유가직접입력',False),
-                       key=key(trip,'fuel_manual')) if product else True
+    if product:
+        with st.popover('유가 설정',width='stretch'):
+            direct = st.toggle('연료 단가 직접 입력', value=m.get('간편유가직접입력',False),key=key(trip,'fuel_manual'))
+    else:
+        direct = True
     if product:
         m['간편유가직접입력'] = direct
     m['간편유가자동'] = bool(product and not direct)
@@ -263,7 +281,8 @@ def fuel_price_field(trip, fuel, unit):
             m['간편유가기준일'] = ''
             st.session_state.pop(key(trip,'간편유가출처'),None)
         number(trip,'간편유가',f'연료 단가 (원/{unit})',None)
-        st.caption('직접 입력한 단가를 사용합니다.' if product else '전기·수소의 과거 단가는 자동 조회를 지원하지 않습니다. 해당 기준일의 단가를 직접 입력하세요.')
+        if not product:
+            st.caption('해당 날짜의 전기·수소 단가를 입력하세요.')
         return
     stored = m.get('간편유가조회',{})
     if (st.session_state.get('original_rules') and stored.get('day')==day and
@@ -276,7 +295,7 @@ def fuel_price_field(trip, fuel, unit):
     st.text_input(f'연료 단가 · 자동 (원/{unit})',value=value,disabled=True,
                   placeholder='해당 날짜 유가 조회 불가',key=key(trip,'fuel_auto_'+day+'_'+product+'_'+value))
     if quote:
-        st.caption(f'{day} · {product} · 전국 평균판매가격 · [오피넷(한국석유공사)]({quote.source})')
+        st.caption(f'{day} · [오피넷 전국 평균]({quote.source})')
     else:
         st.warning(error)
         if st.button('유가 다시 조회',key=key(trip,'fuel_retry')):
@@ -328,6 +347,77 @@ def load_trip(store, identifier):
     st.rerun()
 
 
+def missing_quick_inputs(trip):
+    """총액 산출에 필요한 빈 입력만 이름으로 안내한다."""
+    m = trip.meta
+    if m.get('_상세입력'):
+        return []
+    missing = []
+    def require(name, label, positive=False):
+        value = m.get(name)
+        if value in ('', None) or (positive and dec(value) <= 0):
+            missing.append(label)
+    if trip.kind == '국외':
+        require('기본국가','방문 국가')
+        if m.get('기본국가') != '싱가포르':
+            require('기본도시','방문 도시')
+        require('간편환율','환율',True)
+    local = trip.kind == '국내' and m.get('간편출장범위') == '근무지 내'
+    if local:
+        require('간편시간','출장시간')
+        require('간편거리','왕복거리')
+    elif m.get('간편교통수단') == '자가용':
+        if m.get('간편자가용방식','대중교통 운임') == '연료비':
+            require('간편주행거리','총 주행거리',True)
+            require('간편유가','연료 단가',True)
+        else:
+            require('간편대중교통운임','철도·버스 왕복 운임')
+    return missing
+
+
+def render_result(trip, result, nights):
+    missing = missing_quick_inputs(trip)
+    incomplete = missing or any(line.amount is None and line.status != EXCLUDED for line in result.lines)
+    label = '입력한 항목 합계' if incomplete else '예상 출장비'
+    duration = '당일' if nights == 0 else f'{nights}박 {nights+1}일'
+    st.markdown('<div class="result-heading"><span>'+label+'</span><span>'+duration+'</span></div>'
+                '<div class="result-amount">'+escape(money(result.estimated))+'</div>',unsafe_allow_html=True)
+    local = trip.kind == '국내' and not trip.meta.get('_상세입력') and trip.meta.get('간편출장범위') == '근무지 내'
+    if not local:
+        breakdown = []
+        for category in ['일비','식비','숙박비','교통비']:
+            lines = [line for line in result.lines if line.category == category and line.status != EXCLUDED]
+            amount = sum((line.amount or ZERO for line in lines),ZERO)
+            value = '입력 필요' if any(line.amount is None for line in lines) else money(amount)
+            breakdown.append('<div><span>'+category+'</span><strong>'+escape(value)+'</strong></div>')
+        st.markdown('<div class="result-breakdown">'+''.join(breakdown)+'</div>',unsafe_allow_html=True)
+    if missing:
+        st.info(' · '.join(missing)+' 입력이 필요합니다.')
+    elif incomplete:
+        st.info('미입력 항목은 상세 입력·정산에서 확인하세요.')
+    if result.advance:
+        st.caption('기지급액 차감 후 '+money(max(ZERO,result.estimated-result.advance)))
+    if trip.specials:
+        st.caption('추가 여비 포함 '+money(sum((line.amount or ZERO for line in result.lines if line.category=='기타 인정 여비' and line.status != EXCLUDED),ZERO)))
+
+
+def result_details(store, trip, result):
+    st.caption('예상액에는 승인·증빙 확인 전 금액도 포함됩니다. 확정 청구액 '+money(result.claim))
+    if result.lines:
+        st.dataframe(pd.DataFrame([{'항목':r.category,'일자':r.date,'금액':money(r.amount),'상태':r.status,'계산식':r.formula} for r in result.lines]),hide_index=True,width='stretch')
+    for issue in result.issues:
+        st.caption('• '+issue)
+    if st.button('계산 저장',type='primary'):
+        store.save(trip,result)
+        st.toast('저장했습니다.')
+    xlsx, docx = documents(dumps(result.to_dict()))
+    a, b = st.columns(2)
+    a.download_button('Excel 다운로드',xlsx,'출장비_계산서.xlsx',width='stretch',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    b.download_button('Word 다운로드',docx,'출장비_계산서.docx',width='stretch',mime='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    st.download_button('입력 백업 (JSON)',dumps(result.to_dict()),'출장비_백업.json','application/json')
+    st.caption('공무원 여비 규정 · 자료 기준일 '+load_rules()['as_of'])
+
+
 def run():
     st.set_page_config(page_title='바른여비 · 출장비 계산기', page_icon=':material/work_outline:', layout='centered')
     apply_theme()
@@ -338,7 +428,6 @@ def run():
     title, actions = st.columns([3,1])
     with title:
         st.title('출장비 계산기')
-        st.caption('필요한 것만 입력하면 바로 계산됩니다.')
     with actions:
         with st.popover('내 기록', width='stretch'):
             if st.button('새 계산', width='stretch'):
@@ -353,77 +442,60 @@ def run():
             else:
                 st.caption('저장된 계산이 없습니다.')
     kinds = ['국내','국외'] + (['특수'] if trip.kind == '특수' else [])
-    kind = st.segmented_control('출장 유형',kinds,default=trip.kind,key=key(trip,'kind'),label_visibility='collapsed',width='stretch')
+    kind = st.segmented_control('출장 유형',kinds,default=trip.kind,key=key(trip,'kind'),label_visibility='collapsed')
     if kind:
         trip.kind = kind
+    manual_default = not trip.meta.get('간편입력',False) and any(
+        [trip.days,trip.lodgings,trip.transports,trip.fx,trip.evidence,trip.specials])
+    previous = trip.meta.get('_상세입력', manual_default)
     with st.container(border=True, key='inputs'):
         nights = date_fields(trip)
-        manual_default = not trip.meta.get('간편입력',False) and any(
-            [trip.days,trip.lodgings,trip.transports,trip.fx,trip.evidence,trip.specials])
-        previous = trip.meta.get('_상세입력', manual_default)
-        # 상세표를 숨겨 두면 간편 계산이 기본이며 별도의 일정 생성 버튼이 필요 없다.
-        manual_container = st.empty()
-        if not previous:
-            quick_fields(trip, nights)
-        with st.expander('추가 옵션'):
-            select(trip,'지급등급','지급 등급',GROUPS)
-            trip.meta['간편공용차량'] = st.checkbox('공무용 차량 이용', value=trip.meta.get('간편공용차량',False),key=key(trip,'vehicle'))
-            number(trip,'기지급액','이미 받은 금액 (원)')
-        manual = manual_container.toggle('날짜별로 다르게 입력',value=previous,key=key(trip,'manual'),help='여러 출장지·일부 숙박·무료 제공·상세 증빙이 있을 때 사용하세요. 해제하면 간편 입력 합계로 다시 계산합니다.')
-        if manual != previous:
-            trip.meta['_상세입력'] = manual
-            clear_editors(trip)
-            st.rerun()
-        trip.meta['_상세입력'] = manual
-        if manual:
+        if previous:
+            payment_group(trip)
             detail_fields(trip)
-        elif nights >= 0:
-            try:
-                build_schedule(trip)
-            except ValueError as error:
-                st.error(str(error))
-                return
         else:
-            st.error('복귀일은 출발일 이후로 입력하세요.')
-            return
-    with st.expander('정산서 정보 · 선택 입력'):
-        a, b = st.columns(2)
-        with a:
-            text(trip,'성명');text(trip,'출장명')
-        with b:
-            text(trip,'소속기관');text(trip,'출장목적')
-        trip.meta['출장승인'] = st.checkbox('출장 승인 완료',value=trip.meta.get('출장승인',False),key=key(trip,'approved'))
+            quick_fields(trip, nights)
+    if nights < 0:
+        st.error('복귀일은 출발일 이후로 입력하세요.')
+        return
+    # 상세 설정을 처리한 결과를 위쪽 결과 영역에 채운다.
+    result_area = st.container(border=True, key='result')
+    with st.expander('상세 입력·정산'):
+        conditions, identity, reports = st.tabs(['조건 조정','정산 정보','저장·다운로드'])
+        with conditions:
+            manual = st.toggle('날짜별로 다르게 입력',value=previous,key=key(trip,'manual'),
+                               help='일부 날짜 숙박·다른 출장지·무료 식사·공무용 차량 사용일이 다르면 날짜별로 입력하세요. 해제하면 간편 입력 합계로 다시 계산합니다.')
+            if manual != previous:
+                trip.meta['_상세입력'] = manual
+                clear_editors(trip)
+                st.rerun()
+            trip.meta['_상세입력'] = manual
+            if not manual:
+                trip.meta['간편공용차량'] = st.checkbox('공무용 차량 이용', value=trip.meta.get('간편공용차량',False),key=key(trip,'vehicle'))
+            number(trip,'기지급액','이미 받은 금액 (원)')
+            local = trip.kind == '국내' and trip.meta.get('간편출장범위') == '근무지 내'
+            if not manual and trip.meta.get('간편교통수단') == '자가용' and not local:
+                car_evidence_fields(trip)
+            st.caption('간편 입력은 전체 기간을 여비 인정일로 계산합니다. 개인 일정·식사 제공·일부 날짜 숙박은 날짜별 입력에서 조정하세요.')
+        with identity:
+            a, b = st.columns(2)
+            with a:
+                text(trip,'성명');text(trip,'출장명')
+            with b:
+                text(trip,'소속기관');text(trip,'출장목적')
+            trip.meta['출장승인'] = st.checkbox('출장 승인 완료',value=trip.meta.get('출장승인',False),key=key(trip,'approved'))
+        with reports:
+            report_area = st.container()
     try:
+        if not manual:
+            build_schedule(trip)
         result = calculate_preview(trip, st.session_state.get('original_rules'))
     except (ValueError, KeyError, TypeError, ArithmeticError) as error:
-        st.error('입력값을 확인하세요. '+str(error))
+        with result_area:
+            st.error('입력값을 확인하세요. '+str(error))
         return
     st.session_state.current_result = result
-    with st.container(border=True, key='result'):
-        st.markdown('<div class="result-kicker">예상 출장비</div><div class="result-amount">'+escape(money(result.estimated))+'</div>',unsafe_allow_html=True)
-        st.caption('입력 조건으로 계산한 금액입니다. 승인·증빙이 완료된 청구액은 정산서에서 구분합니다.')
-        columns = st.columns(4)
-        for col, category in zip(columns,['일비','식비','숙박비','교통비']):
-            amount = sum((line.amount or ZERO for line in result.lines if line.category == category and line.status != EXCLUDED),ZERO)
-            col.metric(category,money(amount))
-        if result.advance:
-            st.caption('기지급액 차감 후 예상액 '+money(max(ZERO,result.estimated-result.advance)))
-        if trip.specials:
-            st.caption('기존 추가 여비 '+money(sum((line.amount or ZERO for line in result.lines if line.category=='기타 인정 여비' and line.status != EXCLUDED),ZERO)))
-        if any(line.amount is None and line.status != EXCLUDED for line in result.lines):
-            st.info('아직 계산할 수 없는 항목이 있습니다. 아래 계산 내역에서 필요한 입력을 확인하세요.')
-        if st.button('계산 저장',width='stretch',type='primary'):
-            store.save(trip,result)
-            st.toast('저장했습니다.')
-    with st.expander('계산 내역 · Excel / Word 다운로드'):
-        if result.lines:
-            st.dataframe(pd.DataFrame([{'항목':r.category,'일자':r.date,'금액':money(r.amount),'상태':r.status,'계산식':r.formula} for r in result.lines]),hide_index=True,width='stretch')
-        for issue in result.issues:
-            st.caption('• '+issue)
-        st.caption('확정 청구액 '+money(result.claim)+' · 미확정 산정액 '+money(result.pending))
-        xlsx, docx = documents(dumps(result.to_dict()))
-        a, b = st.columns(2)
-        a.download_button('Excel 다운로드',xlsx,'출장비_계산서.xlsx',width='stretch',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        b.download_button('Word 다운로드',docx,'출장비_계산서.docx',width='stretch',mime='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
-        st.download_button('입력 백업 (JSON)',dumps(result.to_dict()),'출장비_백업.json','application/json')
-    st.caption('공무원 여비 규정 기준 · 자료 기준일 '+load_rules()['as_of'])
+    with result_area:
+        render_result(trip,result,nights)
+    with report_area:
+        result_details(store,trip,result)

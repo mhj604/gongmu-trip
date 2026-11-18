@@ -130,7 +130,7 @@ def test_quick_car_inputs_reach_calculation_without_opening_detail_table():
     assert not app.exception
     result = app.session_state.current_result
     assert next(r for r in result.lines if r.category=='교통비').amount == 25000
-    app.toggle[0].set_value(True).run()
+    next(t for t in app.toggle if t.label=='날짜별로 다르게 입력').set_value(True).run()
     assert not app.exception
     assert any(t.label=='자가용 입력란 표시' and t.value for t in app.toggle)
     assert next(r for r in app.session_state.current_result.lines if r.category=='교통비').amount == 25000

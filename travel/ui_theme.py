@@ -1,32 +1,39 @@
-"""계산기에 필요한 최소한의 화면 스타일."""
+"""필수 입력과 합계를 중심으로 한 간결한 화면 스타일."""
 import streamlit as st
 
 CSS = '''<style>
-.stApp {background:#f6f8fb;color:#1c2e44;}
+.stApp {background:#f7f8fa;color:#202c3b;}
 .stApp,input,textarea,button {font-family:"Pretendard","Apple SD Gothic Neo","Malgun Gothic",sans-serif;}
-.block-container {max-width:860px;padding:5rem 1.5rem 3rem;}
-[data-testid="stHeader"] {background:rgba(246,248,251,.95);}
+.block-container {max-width:760px;padding:4.5rem 1.5rem 2rem;}
+[data-testid="stHeader"] {background:rgba(247,248,250,.96);}
 [data-testid="stAppDeployButton"] {display:none;}
-h1 {font-size:1.85rem!important;line-height:1.4!important;letter-spacing:-.045em;padding:.1rem 0!important;}
-[data-testid="stCaptionContainer"] {color:#7b899b;line-height:1.65;}
-.st-key-inputs,.st-key-result {background:white;border:1px solid #e5eaf0!important;border-radius:16px!important;padding:1.25rem!important;}
-.st-key-result {background:#fff;}
-[data-testid="stWidgetLabel"] p {font-size:.82rem;color:#53657e;}
+h1 {font-size:1.65rem!important;font-weight:700!important;line-height:1.4!important;letter-spacing:-.045em;padding:.1rem 0!important;}
+[data-testid="stCaptionContainer"] {color:#778191;line-height:1.55;}
+.st-key-inputs,.st-key-result {background:#fff;border:1px solid #e5e8ed!important;border-radius:12px!important;padding:1.1rem 1.25rem!important;}
+.st-key-inputs [data-testid="stVerticalBlock"],.st-key-result [data-testid="stVerticalBlock"] {gap:.65rem;}
+[data-testid="stWidgetLabel"] p {font-size:.8rem;color:#5b6675;}
 [data-testid="stTextInputRootElement"],[data-testid="stNumberInputContainer"],
-[data-testid="stSelectbox"] [role="combobox"] {border-radius:9px;background:#f8fafc;}
-[data-testid="stButton"] button,[data-testid="stDownloadButton"] button,[data-testid="stPopover"] button {border-radius:9px;font-size:.84rem;min-height:40px;}
-[data-testid="stExpander"] {border:1px solid #e5eaf0;border-radius:10px;}
-[data-testid="stDataFrame"] {border:1px solid #e5eaf0;border-radius:9px;overflow:hidden;}
+[data-testid="stSelectbox"] [role="combobox"] {border-radius:7px;background:#fff;}
+[data-testid="stNumberInputContainer"] button {display:none;}
+[data-testid="stButton"] button,[data-testid="stDownloadButton"] button,[data-testid="stPopover"] button {border-radius:7px;font-size:.82rem;min-height:36px;}
+[data-testid="stExpander"] {border:0;border-top:1px solid #e5e8ed;border-radius:0;background:transparent;}
+[data-testid="stExpander"] summary p {font-size:.84rem;color:#687587;}
+[data-testid="stDataFrame"] {border:1px solid #e5e8ed;border-radius:7px;overflow:hidden;}
 [data-testid="stTabs"] [role="tablist"] {gap:1.25rem;}
-[data-testid="stMetricLabel"] p {font-size:.75rem;color:#7b899b;}
-[data-testid="stMetricValue"] {font-size:1.05rem;font-weight:600;}
-.result-kicker {font-size:.84rem;color:#6c7d94;margin:.1rem 0 .3rem;}
-.result-amount {font-size:2.6rem;font-weight:750;letter-spacing:-.055em;color:#245ec7;line-height:1.3;font-variant-numeric:tabular-nums;}
+.result-heading {display:flex;justify-content:space-between;align-items:center;font-size:.83rem;color:#657184;}
+.result-heading span:last-child {font-size:.76rem;color:#929aa6;}
+.result-amount {font-size:2.5rem;font-weight:750;letter-spacing:-.055em;color:#245ec7;line-height:1.4;font-variant-numeric:tabular-nums;}
+.result-breakdown {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.5rem;border-top:1px solid #edf0f4;padding-top:.85rem;margin-top:.35rem;}
+.result-breakdown span {display:block;color:#8791a0;font-size:.74rem;margin-bottom:.25rem;}
+.result-breakdown strong {display:block;font-size:.95rem;font-weight:600;letter-spacing:-.025em;font-variant-numeric:tabular-nums;}
 @media(max-width:600px) {
- .block-container {padding:4.75rem 1rem 2rem;}
+ .block-container {padding:4.25rem 1rem 1.5rem;}
  .st-key-inputs,.st-key-result {padding:1rem!important;}
- .result-amount {font-size:2.1rem;}
- [data-testid="stMetricValue"] {font-size:.95rem;}
+ .result-amount {font-size:2.15rem;}
+ .result-breakdown strong {font-size:.84rem;}
+}
+@media(max-width:370px) {
+ .result-breakdown {grid-template-columns:repeat(2,minmax(0,1fr));gap:.8rem;}
 }
 </style>'''
 
