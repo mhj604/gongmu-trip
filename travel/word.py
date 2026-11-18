@@ -47,7 +47,7 @@ def hyperlink(paragraph,text,url):
     r=OxmlElement('w:r');pr=OxmlElement('w:rPr');color=OxmlElement('w:color');color.set(qn('w:val'),'1660A0');pr.append(color);r.append(pr)
     tx=OxmlElement('w:t');tx.text=text;r.append(tx);link.append(r);paragraph._p.append(link)
 
-def export_word(result:Result)->bytes:
+def new_document(header='공무 출장비 정산서'):
     doc=Document()
     section=doc.sections[0]
     section.page_width=Cm(21);section.page_height=Cm(29.7)
@@ -63,12 +63,16 @@ def export_word(result:Result)->bytes:
     doc.styles['Title'].font.size=Pt(20)
     doc.styles['Heading 1'].font.size=Pt(13)
     doc.styles['Heading 1'].paragraph_format.space_before=Pt(12)
-    section.header.paragraphs[0].text='공무 출장비 정산서  /  '+result.trip['meta'].get('출장명','')
+    section.header.paragraphs[0].text=header
     for run in section.header.paragraphs[0].runs: run.font.size=Pt(8)
     foot=section.footer.paragraphs[0];foot.alignment=WD_ALIGN_PARAGRAPH.RIGHT
     foot.add_run('페이지 ')
     field=OxmlElement('w:fldSimple');field.set(qn('w:instr'),'PAGE');foot._p.append(field)
-    doc.add_paragraph(result.trip['kind']+' 출장비 정산서','Title')
+    return doc
+
+
+def append_result(doc, result, title=None):
+    doc.add_paragraph(title or result.trip['kind']+' 출장비 정산서','Title')
     doc.add_paragraph('예상 출장비 (미확정 포함)  '+money(result.estimated))
     p=doc.add_paragraph(status_label(result)+'  ')
     r=p.add_run(money(result.claim));r.bold=True;r.font.size=Pt(19);r.font.color.rgb=RGBColor.from_string(TEAL)
@@ -117,4 +121,9 @@ def export_word(result:Result)->bytes:
     doc.add_paragraph('기본정보와 별도로 각 일정의 세부 조건, 교통·숙박·특수 여비, 환율, 증빙 및 계산 설정을 보존합니다.')
     for key in ['id','kind','days','lodgings','transports','specials','fx','evidence','settings']:
         table(doc,['입력 경로','입력값'],list(flatten({key:result.trip[key]})),[7,10.6])
+
+
+def export_word(result:Result)->bytes:
+    doc=new_document('공무 출장비 정산서  /  '+result.trip['meta'].get('출장명',''))
+    append_result(doc,result)
     buff=BytesIO();doc.save(buff);return buff.getvalue()

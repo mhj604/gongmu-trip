@@ -124,9 +124,10 @@ def test_quick_car_inputs_reach_calculation_without_opening_detail_table():
     assert not app.exception
     next(s for s in app.selectbox if s.label=='자가용 계산 방식').select('연료비').run()
     next(t for t in app.toggle if t.label=='연료 단가 직접 입력').set_value(True).run()
-    for label, value in [('총 주행거리 · 왕복 합계 (km)',119.7),('연료 단가 (원/L)',1700.),
-                         ('통행료 합계 (원)',5000.),('주차료 합계 (원)',3000.)]:
-        next(n for n in app.number_input if n.label==label).set_value(value).run()
+    next(n for n in app.number_input if n.label=='총 주행거리 · 왕복 합계 (km)').set_value(119.7).run()
+    for name, value in [('간편유가','1700'),('간편통행료','5000'),('간편주차료','3000')]:
+        app.session_state[app.session_state.trip.id+'_'+name] = {'value':value}
+        app.run()
     assert not app.exception
     result = app.session_state.current_result
     assert next(r for r in result.lines if r.category=='교통비').amount == 25000

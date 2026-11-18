@@ -14,6 +14,9 @@ from .excel import export_excel
 from .word import export_word
 from .quick import build_schedule, calculate_preview
 from .fuel_prices import FuelQuote, FuelPriceError, fetch_quote, product_for, apply_quote
+from .money_input import amount_input
+from .batch import BatchResult, calculate_batch
+from .batch_documents import export_batch_excel, export_batch_word
 from .ui_theme import apply_theme
 
 GROUPS=['제2호','제1호라','제1호다','제1호나','제1호가']
@@ -90,7 +93,7 @@ def editor(trip, attr, template, visible):
         if pd.api.types.is_bool_dtype(frame[column]):
             configs[column] = st.column_config.CheckboxColumn(column, default=template.get(column, False))
         elif pd.api.types.is_numeric_dtype(frame[column]):
-            configs[column] = st.column_config.NumberColumn(column, min_value=0, step=.01, format='%.15g')
+            configs[column] = st.column_config.NumberColumn(column, min_value=0, step=.01, format='localized')
         else:
             configs[column] = st.column_config.TextColumn(column, default=str(template.get(column, '')))
     selections = {'지역구분': ['서울','광역시','기타'], '교통수단': ['철도','버스','항공','선박','자가용','공무용차량','무료교통','택시','기타'],
@@ -129,6 +132,19 @@ def select(trip, name, label, options, help=None):
 
 def number(trip, name, label, default=0, help=None):
     value = trip.meta.get(name, default)
+    if '원' in label:
+        # 이전 버전의 숫자 위젯 상태는 새 금액 위젯의 상태와 형식이 다르다.
+        state = st.session_state.get(key(trip,name))
+        if state is not None and not isinstance(state,dict):
+            st.session_state.pop(key(trip,name),None)
+        try:
+            answer = amount_input(label,value,key=key(trip,name),help=help)
+        except ValueError:
+            st.error(label+'에 0 이상의 숫자를 입력하세요.')
+            trip.meta.setdefault('_금액입력오류',[]).append(label)
+            answer = None
+        trip.meta[name] = '' if answer is None else str(answer)
+        return answer
     value = None if value in ('', None) else float(value)
     answer = st.number_input(label, min_value=0., value=value, step=1., format='%.15g', key=key(trip, name), help=help)
     trip.meta[name] = '' if answer is None else str(answer)
@@ -291,7 +307,7 @@ def fuel_price_field(trip, fuel, unit):
     else:
         quote, error = lookup_oil_price(day,product)
     apply_quote(m,day,product,quote)
-    value = format(dec(quote.price).normalize(),'f') if quote else ''
+    value = format(dec(quote.price).normalize(),',f') if quote else ''
     st.text_input(f'연료 단가 · 자동 (원/{unit})',value=value,disabled=True,
                   placeholder='해당 날짜 유가 조회 불가',key=key(trip,'fuel_auto_'+day+'_'+product+'_'+value))
     if quote:
@@ -337,14 +353,64 @@ def documents(serialized):
     return export_excel(result), export_word(result)
 
 
+def reset_batch(trips, results=None, identifier=None, title=''):
+    for trip in trips:
+        for name in list(st.session_state):
+            if name.startswith(trip.id+'_'):
+                del st.session_state[name]
+    st.session_state.batch_trips = trips
+    st.session_state.batch_id = identifier or uuid4().hex[:12]
+    st.session_state.batch_title = title
+    st.session_state.batch_group = bool(identifier)
+    st.session_state.pop('batch_title_input',None)
+    st.session_state.batch_rules = {r.trip['id']:r.rule_snapshot for r in results or []}
+    st.session_state.trip = trips[0]
+    st.session_state.batch_selected = trips[0].id
+    st.session_state.original_rules = st.session_state.batch_rules.get(trips[0].id)
+
+
 def load_trip(store, identifier):
     trip, result = store.load(identifier)
-    for name in list(st.session_state):
-        if name.startswith(trip.id+'_'):
-            del st.session_state[name]
-    st.session_state.trip = trip
-    st.session_state.original_rules = result.rule_snapshot
+    reset_batch([trip],[result])
     st.rerun()
+
+
+def load_batch(store, identifier):
+    batch = store.load_batch(identifier)
+    reset_batch([Trip.from_dict(r.trip) for r in batch.results],batch.results,batch.id,batch.title)
+    st.rerun()
+
+
+def active_trip(identifier):
+    trip = next(t for t in st.session_state.batch_trips if t.id == identifier)
+    # 위젯이 없는 동안 편집 패치가 정리되어도 마지막 입력으로 표를 복원한다.
+    clear_editors(trip)
+    st.session_state.trip = trip
+    st.session_state.original_rules = st.session_state.batch_rules.get(trip.id)
+
+
+def render_batch_result(store, batch):
+    incomplete = batch.incomplete or any(missing_quick_inputs(Trip.from_dict(r.trip)) for r in batch.results)
+    label = '전체 입력한 항목 합계' if incomplete else '전체 예상 출장비'
+    st.markdown('<div class="result-heading"><span>'+label+'</span><span>출장 '+str(len(batch.results))+'건</span></div>'
+                '<div class="result-amount">'+escape(money(batch.estimated))+'</div>',unsafe_allow_html=True)
+    parts = ['<div><span>'+cat+'</span><strong>'+escape(money(batch.category(cat)))+'</strong></div>'
+             for cat in ['일비','식비','숙박비','교통비']]
+    st.markdown('<div class="result-breakdown">'+''.join(parts)+'</div>',unsafe_allow_html=True)
+    for row in batch.rows():
+        st.markdown('<div class="batch-row"><span>'+escape(str(row['번호'])+'. '+row['출장명'])+
+                    '<small>'+escape(row['출발일']+' ~ '+row['복귀일'])+'</small></span><strong>'+escape(money(row['예상 출장비']))+'</strong></div>',unsafe_allow_html=True)
+    if incomplete:
+        st.info('입력이 필요한 출장이 있습니다. 각 출장에서 빠진 항목을 확인하세요.')
+    save, excel, word = st.columns(3)
+    if save.button('일괄 저장',type='primary',width='stretch'):
+        store.save_batch(batch)
+        st.toast('출장 '+str(len(batch.results))+'건을 함께 저장했습니다.')
+    payload = dumps(batch.to_dict())
+    excel.download_button('전체 Excel',lambda:export_batch_excel(BatchResult.from_dict(json.loads(payload))),
+                          '출장비_일괄정산.xlsx',width='stretch',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    word.download_button('전체 Word',lambda:export_batch_word(BatchResult.from_dict(json.loads(payload))),
+                         '출장비_일괄정산.docx',width='stretch',mime='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
 
 
 def missing_quick_inputs(trip):
@@ -401,12 +467,16 @@ def render_result(trip, result, nights):
         st.caption('추가 여비 포함 '+money(sum((line.amount or ZERO for line in result.lines if line.category=='기타 인정 여비' and line.status != EXCLUDED),ZERO)))
 
 
-def result_details(store, trip, result):
+def result_details(store, trip, result, batch=None):
     st.caption('예상액에는 승인·증빙 확인 전 금액도 포함됩니다. 확정 청구액 '+money(result.claim))
     if result.lines:
         st.dataframe(pd.DataFrame([{'항목':r.category,'일자':r.date,'금액':money(r.amount),'상태':r.status,'계산식':r.formula} for r in result.lines]),hide_index=True,width='stretch')
     for issue in result.issues:
         st.caption('• '+issue)
+    if batch is not None and (len(batch.results)>1 or st.session_state.get('batch_group')):
+        st.download_button('전체 입력 백업 (JSON)',dumps(batch.to_dict()),'출장비_일괄백업.json','application/json')
+        st.caption('위쪽 전체 합계에서 일괄 저장·출력할 수 있습니다. 이 탭은 선택한 출장의 상세 계산입니다.')
+        return
     if st.button('계산 저장',type='primary'):
         store.save(trip,result)
         st.toast('저장했습니다.')
@@ -425,22 +495,46 @@ def run():
     if 'trip' not in st.session_state:
         st.session_state.trip = default_trip(store)
     trip = st.session_state.trip
+    if 'batch_trips' not in st.session_state:
+        st.session_state.batch_trips = [trip]
+        st.session_state.batch_id = uuid4().hex[:12]
+        st.session_state.batch_title = ''
+        st.session_state.batch_rules = {trip.id:st.session_state.original_rules} if st.session_state.get('original_rules') else {}
+    if st.session_state.get('batch_pending_id'):
+        target = st.session_state.pop('batch_pending_id')
+        active_trip(target)
+        st.session_state.batch_selected = target
+        trip = st.session_state.trip
+    trips = st.session_state.batch_trips
+    if len(trips)>1:
+        st.session_state.batch_group = True
+    batch_mode = len(trips)>1 or st.session_state.get('batch_group',False)
     title, actions = st.columns([3,1])
     with title:
         st.title('출장비 계산기')
     with actions:
         with st.popover('내 기록', width='stretch'):
             if st.button('새 계산', width='stretch'):
-                st.session_state.trip = default_trip(store)
-                st.session_state.pop('original_rules', None)
+                reset_batch([default_trip(store)])
                 st.rerun()
-            records = store.list()
+            records = [('batch',r[0],'묶음 · '+r[1]+' · '+str(r[2])+'건 · '+r[3][:10]) for r in store.list_batches()]
+            records += [('trip',r[0],(r[1] or '제목 없는 출장')+' · '+r[3][:10]) for r in store.list()]
             if records:
-                chosen = st.selectbox('저장된 계산', records, format_func=lambda row: (row[1] or '제목 없는 출장')+' · '+row[3][:10])
+                chosen = st.selectbox('저장된 계산', records, format_func=lambda row:row[2])
                 if st.button('불러오기', width='stretch'):
-                    load_trip(store, chosen[0])
+                    (load_batch if chosen[0]=='batch' else load_trip)(store,chosen[1])
             else:
                 st.caption('저장된 계산이 없습니다.')
+    nav, add = st.columns([3,1])
+    with nav:
+        if len(trips)>1:
+            labels = {t.id:f'{i}. '+(t.meta.get('출장명') or '출장 '+str(i)) for i,t in enumerate(trips,1)}
+            selected = st.selectbox('입력할 출장',[t.id for t in trips],index=next(i for i,t in enumerate(trips) if t.id==trip.id),
+                                    format_func=lambda identifier:labels[identifier],key='batch_selected',label_visibility='collapsed')
+        else:
+            selected = trip.id
+    with add:
+        add_requested = st.button('출장 추가',icon=':material/add:',width='stretch')
     kinds = ['국내','국외'] + (['특수'] if trip.kind == '특수' else [])
     kind = st.segmented_control('출장 유형',kinds,default=trip.kind,key=key(trip,'kind'),label_visibility='collapsed')
     if kind:
@@ -449,15 +543,13 @@ def run():
         [trip.days,trip.lodgings,trip.transports,trip.fx,trip.evidence,trip.specials])
     previous = trip.meta.get('_상세입력', manual_default)
     with st.container(border=True, key='inputs'):
+        trip.meta.pop('_금액입력오류',None)
         nights = date_fields(trip)
         if previous:
             payment_group(trip)
             detail_fields(trip)
         else:
             quick_fields(trip, nights)
-    if nights < 0:
-        st.error('복귀일은 출발일 이후로 입력하세요.')
-        return
     # 상세 설정을 처리한 결과를 위쪽 결과 영역에 채운다.
     result_area = st.container(border=True, key='result')
     with st.expander('상세 입력·정산'):
@@ -473,6 +565,7 @@ def run():
             if not manual:
                 trip.meta['간편공용차량'] = st.checkbox('공무용 차량 이용', value=trip.meta.get('간편공용차량',False),key=key(trip,'vehicle'))
             number(trip,'기지급액','이미 받은 금액 (원)')
+            remove_requested = len(trips)>1 and st.button('현재 출장을 묶음에서 제외',key=key(trip,'remove_batch'))
             local = trip.kind == '국내' and trip.meta.get('간편출장범위') == '근무지 내'
             if not manual and trip.meta.get('간편교통수단') == '자가용' and not local:
                 car_evidence_fields(trip)
@@ -485,17 +578,42 @@ def run():
                 text(trip,'소속기관');text(trip,'출장목적')
             trip.meta['출장승인'] = st.checkbox('출장 승인 완료',value=trip.meta.get('출장승인',False),key=key(trip,'approved'))
         with reports:
+            if batch_mode:
+                st.session_state.batch_title = st.text_input('묶음 이름 (선택)',value=st.session_state.batch_title,key='batch_title_input',placeholder='예: 11월 출장 정산')
             report_area = st.container()
+    if add_requested:
+        added = default_trip(store)
+        for name in ('성명','소속기관','지급등급'):
+            if trip.meta.get(name):
+                added.meta[name] = trip.meta[name]
+        trips.append(added)
+        st.session_state.batch_group = True
+        st.session_state.batch_pending_id = added.id
+        st.rerun()
+    if remove_requested:
+        trips.remove(trip)
+        st.session_state.batch_rules.pop(trip.id,None)
+        st.session_state.batch_pending_id = trips[0].id
+        st.rerun()
+    if selected != trip.id:
+        active_trip(selected)
+        st.rerun()
+
     try:
         if not manual:
             build_schedule(trip)
-        result = calculate_preview(trip, st.session_state.get('original_rules'))
+        batch = calculate_batch(trips,st.session_state.batch_rules,identifier=st.session_state.batch_id,title=st.session_state.batch_title)
+        result = next(r for r in batch.results if r.trip['id']==trip.id)
     except (ValueError, KeyError, TypeError, ArithmeticError) as error:
         with result_area:
             st.error('입력값을 확인하세요. '+str(error))
         return
     st.session_state.current_result = result
+    st.session_state.current_batch = batch
     with result_area:
-        render_result(trip,result,nights)
+        if batch_mode:
+            render_batch_result(store,batch)
+        else:
+            render_result(trip,result,nights)
     with report_area:
-        result_details(store,trip,result)
+        result_details(store,trip,result,batch)
