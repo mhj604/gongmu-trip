@@ -239,7 +239,9 @@ def shared_lodging_fields(trip):
                 name = st.text_input(f'동행 {i+1} 성명 (선택)',value=person.get('성명',''),key=key(trip,f'shared_name_{i}'))
                 grade = person.get('지급등급') or m.get('지급등급','제2호')
                 group = st.selectbox(f'동행 {i+1} 지급 등급',GROUPS,index=GROUPS.index(grade) if grade in GROUPS else 0,key=key(trip,f'shared_grade_{i}'))
-                people.append({'성명':name,'지급등급':group})
+                agency = st.text_input(f'동행 {i+1} 소속기관 (선택)',value=person.get('소속기관',''),key=key(trip,f'shared_agency_{i}'))
+                position = st.text_input(f'동행 {i+1} 직급·직위 (선택)',value=person.get('직위직급',''),key=key(trip,f'shared_position_{i}'))
+                people.append({'성명':name,'지급등급':group,'소속기관':agency,'직위직급':position})
             m['공동숙박자'] = people
     st.caption('위 숙박비에는 객실 영수증 총액을 한 번만 입력하세요. 같은 기간·지역에 함께 숙박한 공무 출장자만 포함합니다. '+SCOPE_NOTE)
 
@@ -380,7 +382,7 @@ def detail_fields(trip):
 
 
 @st.cache_data(show_spinner=False, max_entries=20)
-def documents(serialized):
+def documents(serialized, layout_version='공식서식-2026-11-18.2'):
     result = Result.from_dict(json.loads(serialized))
     return export_excel(result), export_word(result)
 
@@ -431,10 +433,10 @@ def render_batch_result(store, batch):
     st.markdown('<div class="result-breakdown">'+''.join(parts)+'</div>',unsafe_allow_html=True)
     st.caption('출장별 비용')
     for row, result in zip(batch.rows(), batch.results):
-        with st.container(border=True, key='batch_detail_'+result.trip['id']):
-            st.markdown('<div class="batch-row"><span>'+escape(str(row['번호'])+'. '+row['출장명'])+
-                        '<small>'+escape(row['출발일']+' ~ '+row['복귀일'])+'</small></span><strong>'+escape(money(row['예상 출장비']))+'</strong></div>',unsafe_allow_html=True)
-            render_cost_breakdown(result)
+        st.markdown('<article class="trip-cost-card"><header><span class="trip-number">'+str(row['번호'])+'</span>'
+            '<div class="trip-identity"><strong>'+escape(row['출장명'])+'</strong><span>'+escape(row['출발일']+' ~ '+row['복귀일'])+'</span></div>'
+            '<div class="trip-total"><span>예상 출장비</span><strong>'+escape(money(row['예상 출장비']))+'</strong></div></header>'
+            '<div class="result-breakdown">'+cost_breakdown_html(result)+'</div></article>',unsafe_allow_html=True)
     if incomplete:
         st.info('입력이 필요한 출장이 있습니다. 각 출장에서 빠진 항목을 확인하세요.')
     save, excel, word = st.columns(3)
@@ -446,6 +448,7 @@ def render_batch_result(store, batch):
                           '출장비_일괄정산.xlsx',width='stretch',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     word.download_button('전체 Word',lambda:export_batch_word(BatchResult.from_dict(json.loads(payload))),
                          '출장비_일괄정산.docx',width='stretch',mime='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    st.caption('출력: [인사혁신처 공식 신청서](https://www.mpm.go.kr/mpm/info/resultPay/payBoard/?cntId=695&mode=view)와 별첨 계산 내역')
 
 
 def missing_quick_inputs(trip):
@@ -476,14 +479,18 @@ def missing_quick_inputs(trip):
     return missing
 
 
-def render_cost_breakdown(result):
+def cost_breakdown_html(result):
     breakdown = []
     for category in ['일비','식비','숙박비','교통비']:
         lines = [line for line in result.lines if line.category == category and line.status != EXCLUDED]
         amount = sum((line.amount or ZERO for line in lines),ZERO)
         value = '입력 필요' if any(line.amount is None for line in lines) else money(amount)
         breakdown.append('<div><span>'+category+'</span><strong>'+escape(value)+'</strong></div>')
-    st.markdown('<div class="result-breakdown">'+''.join(breakdown)+'</div>',unsafe_allow_html=True)
+    return ''.join(breakdown)
+
+
+def render_cost_breakdown(result):
+    st.markdown('<div class="result-breakdown">'+cost_breakdown_html(result)+'</div>',unsafe_allow_html=True)
 
 
 def render_line_details(result):
@@ -629,7 +636,7 @@ def run():
         with identity:
             a, b = st.columns(2)
             with a:
-                text(trip,'성명');text(trip,'출장명')
+                text(trip,'성명');text(trip,'출장명');text(trip,'직위직급','직급·직위')
             with b:
                 text(trip,'소속기관');text(trip,'출장목적')
             trip.meta['출장승인'] = st.checkbox('출장 승인 완료',value=trip.meta.get('출장승인',False),key=key(trip,'approved'))

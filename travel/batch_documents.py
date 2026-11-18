@@ -4,10 +4,10 @@ from datetime import date
 from zipfile import ZipFile, ZIP_DEFLATED
 from xml.etree import ElementTree as ET
 from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Font, PatternFill, Alignment
 from .models import CATEGORIES, money
 from .report import flatten, deadlines
-from .excel import sheet, safe_value, MONEY, NAVY, shared_lodging_sheet
+from .excel import sheet, safe_value, MONEY, NAVY, shared_lodging_sheet, FONT
 from .word import new_document, append_result, table
 
 
@@ -33,36 +33,57 @@ def export_batch_excel(batch):
         caches[cell.coordinate] = sum((row[headers[column-1]] for row in rows))
     for cell in ws[total_row]:
         cell.fill = PatternFill('solid',fgColor=NAVY)
-        cell.font = Font(name='맑은 고딕',size=11,bold=True,color='FFFFFF')
+        cell.font = Font(name=FONT,size=11,bold=True,color='FFFFFF')
     ws.row_dimensions[total_row].height = 32
     for category in CATEGORIES:
         row_number = ws.max_row+1
         ws.cell(row_number,2,category+' 합계')
+        ws.merge_cells(start_row=row_number,start_column=2,end_row=row_number,end_column=4)
+        ws.merge_cells(start_row=row_number,start_column=5,end_row=row_number,end_column=6)
         cell = ws.cell(row_number,5)
         safe_value(cell,batch.category(category))
         cell.number_format = MONEY
+        ws.row_dimensions[row_number].height=28
+        for column in (2,5):
+            value=ws.cell(row_number,column)
+            value.font=Font(name=FONT,size=10,color=NAVY)
+            value.fill=PatternFill('solid',fgColor='F4F7FA')
+            value.alignment=Alignment(vertical='center',horizontal='right' if column==5 else 'left',indent=1)
     ws.print_area = f'A1:I{ws.max_row}'
     ws.cell(2,1,'출장별 정산 결과 합계 | 기지급액은 각 출장에서 차감 · 미산출 항목은 상태 열 확인')
     detail = []
+    grounds = []
     raw = []
     review = []
     for i,result in enumerate(batch.results,1):
         name = rows[i-1]['출장명']
         for line in result.lines:
-            detail.append([i,name,line.date,line.category,line.name,line.actual,line.amount,line.status,
-                           line.formula,line.reference,line.source,line.rule_version,line.notes])
+            detail.append([i,name,line.date,line.category,line.name,line.actual,line.amount,line.status])
+            grounds.extend([f'{i}. {name} / {line.date} / {line.name}',label,value] for label,value in
+                [('계산식',line.formula),('근거',line.reference),('출처',line.source),('법령 버전',line.rule_version),('비고',line.notes)])
         raw.extend([i,name,path,value] for path,value in flatten(result.trip))
         raw.append([i,name,'적용 법령자료 버전',result.rule_snapshot['version']])
         review.extend([i,name,'미확정 사유',issue] for issue in result.issues)
         review.extend([i,name,'정산기한 / '+r['항목'],r['기한']+' / '+r['근거']] for r in deadlines(result))
-    sheet(wb,'02_항목별_내역','출장별 항목과 계산식',
-          ['번호','출장명','일자','항목','내역','실제 지출액','인정금액','상태','계산식','근거','출처','법령 버전','비고'],
-          detail,[7,24,15,14,27,19,19,19,52,40,52,26,55],(6,7))
+    sheet(wb,'02_항목별_내역','출장별 항목과 금액',
+          ['번호','출장명','일자','항목','내역','실제 지출액','인정금액','상태'],
+          detail,[6,23,14,12,28,19,19,22],(6,7))
     sheet(wb,'03_원본_입력','출장별 원본 입력',
           ['번호','출장명','입력 경로','입력값'],raw,[7,24,50,85])
     sheet(wb,'04_정산_확인','출장별 정산 사유와 기한',
           ['번호','출장명','구분','내용'],review,[7,24,42,95])
     shared_lodging_sheet(wb,batch.results,'05_공동숙박_분담')
+    sheet(wb,'06_계산_근거','출장별 계산식과 적용 근거',
+          ['출장·일자·항목','구분','내용'],grounds,[32,18,86])
+    sheet(wb,'07_출장별_비용','출장별 비용 요약',
+          ['출장','일비','식비','숙박비','교통비','기타 인정 여비','예상 출장비'],
+          [[f'{r["번호"]}. {r["출장명"]}',*[r[c] for c in CATEGORIES],r['예상 출장비']] for r in rows],
+          [30,19,19,19,19,20,22],(2,3,4,5,6,7))
+    from .official_forms import append_excel_forms
+    form_sheets=[]
+    for i,result in enumerate(batch.results,1):form_sheets+=append_excel_forms(wb,result,f'{i}_')
+    # 일괄 출력은 총괄 뒤에 출장별 공식 신청서를 모은다.
+    for index,form in enumerate(form_sheets,1):wb.move_sheet(form,offset=index-wb.index(form))
     wb.active = 0
     buffer = BytesIO()
     wb.save(buffer)
@@ -102,7 +123,9 @@ def export_batch_word(batch):
     for i,result in enumerate(batch.results,1):
         doc.add_page_break()
         name = result.trip['meta'].get('출장명') or f'출장 {i}'
-        append_result(doc,result,f'{i} {name} 정산서')
+        from .official_forms import append_word_forms
+        if append_word_forms(doc,result):doc.add_page_break()
+        append_result(doc,result,f'별첨 {i} {name} 계산 내역')
     output = BytesIO()
     doc.save(output)
     return output.getvalue()

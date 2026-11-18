@@ -9,7 +9,7 @@ export default function(component) {
   label.textContent = data.label;
   help.textContent = data.help || '';
   help.hidden = !data.help;
-  input.placeholder = data.placeholder || '0';
+  input.placeholder = parentElement.activeElement === input ? '' : (data.placeholder || '0');
   const clean = value => value.replace(/,/g, '').replace(/\s/g, '');
   const valid = value => value === '' || /^\d+(\.\d*)?$/.test(value);
   const format = value => {
@@ -18,6 +18,15 @@ export default function(component) {
     return whole.replace(/^0+(?=\d)/,'').replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (fraction === undefined ? '' : '.' + fraction);
   };
   if (parentElement.activeElement !== input) input.value = format(data.value || '');
+  const beginEditing = () => {
+    input.placeholder = '';
+    if (/^0(?:\.0*)?$/.test(clean(input.value))) {
+      input.value = '';
+      input.dataset.clearedZero = 'true';
+    }
+  };
+  input.onfocus = beginEditing;
+  input.onclick = beginEditing;
   const showError = () => {
     const invalid = !valid(clean(input.value));
     error.hidden = !invalid;
@@ -40,12 +49,19 @@ export default function(component) {
     showError();
   };
   const commit = () => {
-    const raw = clean(input.value);
+    let raw = clean(input.value);
+    if (raw === '' && input.dataset.clearedZero === 'true') raw = '0';
+    if (valid(raw)) raw = clean(format(raw));
+    input.value = format(raw);
+    delete input.dataset.clearedZero;
     showError();
     // 잘못된 입력도 전달해 이전 금액으로 조용히 계산되지 않게 한다.
     if (raw !== data.value) setStateValue('value', raw);
   };
-  input.onblur = commit;
+  input.onblur = () => {
+    commit();
+    input.placeholder = data.placeholder || '0';
+  };
   input.onkeydown = event => {
     if (event.key === 'Enter') {
       event.preventDefault();

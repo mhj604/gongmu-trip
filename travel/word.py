@@ -2,15 +2,16 @@
 from io import BytesIO
 from decimal import Decimal
 from docx import Document
-from docx.shared import Cm,Pt,RGBColor
+from docx.shared import Cm,Pt,RGBColor,Twips
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from .models import *
 from .report import flatten,metadata,deadlines,status_label,period
 from .shared_lodging import allocation, SCOPE_NOTE
 
-NAVY='182F4D'; TEAL='087F8C'
+NAVY='243B57'; TEAL='245EC7'; FONT='맑은 고딕'
 
 def shade(cell,color):
     element=OxmlElement('w:shd');element.set(qn('w:fill'),color);cell._tc.get_or_add_tcPr().append(element)
@@ -23,22 +24,49 @@ def display(value):
 def table(doc,headers,rows,widths):
     t=doc.add_table(rows=1,cols=len(headers))
     t.autofit=False
-    for col,width in zip(t.columns,widths): col.width=Cm(width)
-    for c,h,width in zip(t.rows[0].cells,headers,widths):
-        c.width=Cm(width); c.text=h; shade(c,'EAF0F6')
-        for run in c.paragraphs[0].runs: run.bold=True;run.font.color.rgb=RGBColor.from_string(NAVY)
+    t.alignment=WD_TABLE_ALIGNMENT.CENTER
+    section=doc.sections[-1]
+    content_width=int((section.page_width-section.left_margin-section.right_margin)/635)
+    exact=[round(content_width*w/sum(widths)) for w in widths]
+    exact[-1]+=content_width-sum(exact)
+    pr=t._tbl.tblPr
+    size=pr.find(qn('w:tblW'));size.set(qn('w:type'),'dxa');size.set(qn('w:w'),str(content_width))
+    borders=OxmlElement('w:tblBorders')
+    for side in ['top','left','bottom','right','insideH','insideV']:
+        edge=OxmlElement('w:'+side)
+        for key,value in [('val','single'),('sz','4'),('color','D9D9D9')]:edge.set(qn('w:'+key),value)
+        borders.append(edge)
+    pr.append(borders)
+    margins=OxmlElement('w:tblCellMar')
+    for side,value in [('top','90'),('bottom','90'),('start','110'),('end','110')]:
+        item=OxmlElement('w:'+side);item.set(qn('w:w'),value);item.set(qn('w:type'),'dxa');margins.append(item)
+    pr.append(margins)
+    for col,width in zip(t.columns,exact): col.width=Twips(width)
+    for c,h,width in zip(t.rows[0].cells,headers,exact):
+        c.width=Twips(width); c.text=h; shade(c,NAVY)
+        c.vertical_alignment=WD_CELL_VERTICAL_ALIGNMENT.CENTER
+        for p in c.paragraphs:
+            p.paragraph_format.keep_with_next=True
+            p.paragraph_format.space_after=Pt(3)
+            for run in p.runs: run.bold=True;run.font.size=Pt(9);run.font.color.rgb=RGBColor(255,255,255)
     repeat=OxmlElement('w:tblHeader');t.rows[0]._tr.get_or_add_trPr().append(repeat)
-    for values in list(rows) or [['해당 없음']+['']*(len(headers)-1)]:
+    for i,values in enumerate(list(rows) or [['해당 없음']+['']*(len(headers)-1)]):
         row=t.add_row()
-        no_split=OxmlElement('w:cantSplit');row._tr.get_or_add_trPr().append(no_split)
-        for c,value,width in zip(row.cells,values,widths):
-            c.width=Cm(width);c.text=display(value)
+        if max(len(display(v)) for v in values)<900:
+            no_split=OxmlElement('w:cantSplit');row._tr.get_or_add_trPr().append(no_split)
+        for c,value,width in zip(row.cells,values,exact):
+            c.width=Twips(width);c.text=display(value)
+            c.vertical_alignment=WD_CELL_VERTICAL_ALIGNMENT.CENTER
+            if i%2:shade(c,'F4F7FA')
             for p in c.paragraphs:
-                p.paragraph_format.space_after=Pt(3)
-                p.paragraph_format.space_before=Pt(3)
+                p.paragraph_format.space_after=Pt(1)
+                p.paragraph_format.space_before=Pt(1)
+                p.paragraph_format.line_spacing=1.15
+                p.paragraph_format.keep_with_next=False
                 if isinstance(value,(Decimal,int,float)): p.alignment=WD_ALIGN_PARAGRAPH.RIGHT
                 for r in p.runs:r.font.size=Pt(9)
-    doc.add_paragraph().paragraph_format.space_after=Pt(1)
+    spacer=doc.add_paragraph();spacer.paragraph_format.space_after=Pt(2);spacer.paragraph_format.space_before=Pt(0)
+    spacer.paragraph_format.line_spacing=Pt(3)
     return t
 
 def hyperlink(paragraph,text,url):
@@ -54,16 +82,35 @@ def new_document(header='공무 출장비 정산서'):
     section.page_width=Cm(21);section.page_height=Cm(29.7)
     section.top_margin=Cm(1.6);section.bottom_margin=Cm(1.6)
     section.left_margin=Cm(1.7);section.right_margin=Cm(1.7)
-    for name in ['Normal','Title','Heading 1','Heading 2']:
+    for name in ['Normal','Title','Heading 1','Heading 2','Caption']:
         style=doc.styles[name]
-        style.font.name='맑은 고딕'
-        style.element.get_or_add_rPr().rFonts.set(qn('w:eastAsia'),'맑은 고딕')
-        style.font.color.rgb=RGBColor.from_string(NAVY if name!='Normal' else '283747')
+        style.font.name=FONT
+        style.element.get_or_add_rPr().rFonts.set(qn('w:eastAsia'),FONT)
+        fonts=style.element.get_or_add_rPr().rFonts
+        for key in ['asciiTheme','eastAsiaTheme','hAnsiTheme','cstheme']:
+            fonts.attrib.pop(qn('w:'+key),None)
+        paragraph=style.element.find(qn('w:pPr'))
+        if paragraph is not None:
+            border=paragraph.find(qn('w:pBdr'))
+            if border is not None:paragraph.remove(border)
+        style.font.color.rgb=RGBColor.from_string('283747' if name=='Normal' else '000000')
     doc.styles['Normal'].font.size=Pt(10)
     doc.styles['Normal'].paragraph_format.space_after=Pt(6)
-    doc.styles['Title'].font.size=Pt(20)
+    doc.styles['Normal'].paragraph_format.line_spacing=1.25
+    doc.styles['Normal'].paragraph_format.widow_control=True
+    doc.styles['Title'].font.size=Pt(22)
+    doc.styles['Title'].font.bold=True
+    doc.styles['Title'].font.underline=False
+    doc.styles['Title'].paragraph_format.space_after=Pt(8)
     doc.styles['Heading 1'].font.size=Pt(13)
     doc.styles['Heading 1'].paragraph_format.space_before=Pt(12)
+    for name in ['Heading 1','Heading 2']:
+        doc.styles[name].paragraph_format.keep_with_next=True
+        doc.styles[name].paragraph_format.space_after=Pt(6)
+    doc.styles['Heading 2'].font.size=Pt(11)
+    doc.styles['Caption'].font.size=Pt(9)
+    doc.styles['Caption'].font.color.rgb=RGBColor.from_string('657184')
+    section.header_distance=Cm(.7);section.footer_distance=Cm(.7)
     section.header.paragraphs[0].text=header
     for run in section.header.paragraphs[0].runs: run.font.size=Pt(8)
     foot=section.footer.paragraphs[0];foot.alignment=WD_ALIGN_PARAGRAPH.RIGHT
@@ -74,19 +121,20 @@ def new_document(header='공무 출장비 정산서'):
 
 def append_result(doc, result, title=None):
     doc.add_paragraph(title or result.trip['kind']+' 출장비 정산서','Title')
+    m=result.trip['meta']
+    doc.add_paragraph((m.get('출장명') or '출장 정산')+'  |  '+period(result),'Caption')
     doc.add_paragraph('예상 출장비 (미확정 포함)  '+money(result.estimated))
     p=doc.add_paragraph(status_label(result)+'  ')
     r=p.add_run(money(result.claim));r.bold=True;r.font.size=Pt(19);r.font.color.rgb=RGBColor.from_string(TEAL)
     doc.add_paragraph(f'확정 인정액 {money(result.recognized)}  ·  기지급액 {money(result.advance)}  ·  반납예정액 {money(result.refund)}')
     if result.issues:doc.add_paragraph(f'미확정 항목 {len(result.issues)}건은 확정 청구액에서 제외했습니다. 금액을 산정할 수 없는 항목도 포함됩니다.')
     doc.add_heading('1 출장 개요',1)
-    table(doc,['항목','입력 내용'],list(flatten(result.trip['meta'])),[4,13.6])
-    doc.add_heading('2 출장 일정',1)
-    table(doc,['일자','국가 및 도시','업무와 이동 일정'],
-        [[r.get('일자',''),f'{r.get("국가", "")} {r.get("도시", "")}',f'{r.get("업무일정", "")} {r.get("이동일정", "")}'] for r in result.trip['days']],[2.8,4.5,10.3])
-    doc.add_heading('3 출장비 정산 총괄',1)
+    overview=[('출장자',m.get('성명') or '미입력'),('소속기관',m.get('소속기관') or '미입력'),
+              ('출장목적',m.get('출장목적') or '미입력'),('지급등급',m.get('지급등급') or '미입력')]
+    table(doc,['항목','입력 내용'],overview,[3,14.6])
+    doc.add_heading('2 출장비 정산 총괄',1)
     rows=[[r['항목'],r['기준금액'],r['인정금액'],r['미확정금액']] for r in result.summary()]
-    rows+=[['확정 인정액 합계',None,result.recognized,result.pending],['기지급액',None,result.advance,None],[status_label(result),None,result.claim,None]]
+    rows+=[['확정 인정액 합계','—',result.recognized,result.pending],['기지급액','—',result.advance,'—'],[status_label(result),'—',result.claim,'—']]
     t=table(doc,['항목','기준금액','확정 인정액','미확정금액'],rows,[5.1,4.1,4.2,4.2])
     for cell in t.rows[-1].cells:
         shade(cell,'DCF0EF')
@@ -99,6 +147,9 @@ def append_result(doc, result, title=None):
         table(doc,['정산 대상·등급','숙박','분담액','상한','예상 인정액'],
             [[r['정산 대상']+'\n'+r['지급 등급'],str(r['숙박일'])+'박',r['분담액'],r['상한'],r['예상 인정액']] for r in shared],
             [5.2,1.3,3.7,3.7,3.7])
+    doc.add_heading('3 출장 일정',1)
+    table(doc,['일자','국가 및 도시','업무와 이동 일정'],
+        [[r.get('일자',''),f'{r.get("국가", "")} {r.get("도시", "")}',f'{r.get("업무일정", "")} {r.get("이동일정", "")}'] for r in result.trip['days']],[2.8,4.5,10.3])
     doc.add_heading('4 항목별 상세 계산',1)
     for cat in CATEGORIES:
         items=[r for r in result.lines if r.category==cat]
@@ -127,11 +178,13 @@ def append_result(doc, result, title=None):
     doc.add_paragraph('생성일시 '+result.generated_at+' / 법령자료 버전 '+result.rule_snapshot['version'])
     doc.add_heading('부록 모든 원본 입력',1)
     doc.add_paragraph('기본정보와 별도로 각 일정의 세부 조건, 교통·숙박·특수 여비, 환율, 증빙 및 계산 설정을 보존합니다.')
-    for key in ['id','kind','days','lodgings','transports','specials','fx','evidence','settings']:
-        table(doc,['입력 경로','입력값'],list(flatten({key:result.trip[key]})),[7,10.6])
+    for key in ['id','kind','meta','days','lodgings','transports','specials','fx','evidence','settings']:
+        table(doc,['입력 경로','입력값'],list(flatten({key:result.trip[key]})),[6,11.6])
 
 
 def export_word(result:Result)->bytes:
     doc=new_document('공무 출장비 정산서  /  '+result.trip['meta'].get('출장명',''))
-    append_result(doc,result)
+    from .official_forms import append_word_forms
+    if append_word_forms(doc,result):doc.add_page_break()
+    append_result(doc,result,'별첨 출장비 계산 내역')
     buff=BytesIO();doc.save(buff);return buff.getvalue()

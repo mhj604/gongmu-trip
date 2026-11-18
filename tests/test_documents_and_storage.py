@@ -17,19 +17,21 @@ def test_documents_use_same_result_and_preserve_every_raw_value():
     r=calculate(t)
     book=load_workbook(BytesIO(export_excel(r)),data_only=True)
     doc=Document(BytesIO(export_word(r)))
-    assert len(book.sheetnames)==9
-    assert book.worksheets[0]['D10'].value==185000
-    assert book.worksheets[0]['D12'].value==185000
+    assert len(book.sheetnames)==10
+    assert book.worksheets[0]['A2'].value=='국내여비 정산 신청서'
+    summary=book['01_출장비_요약']
+    assert summary['D10'].value==185000
+    assert summary['D12'].value==185000
     all_word='\n'.join(p.text for p in doc.paragraphs)+'\n'+'\n'.join(c.text for ta in doc.tables for row in ta.rows for c in row.cells)
     assert '185,000원' in all_word
     assert '입력 원문 보존 확인' in all_word
-    assert any('입력 원문 보존 확인'==row[1] for row in book.worksheets[1].iter_rows(values_only=True) if len(row)>1)
+    assert any('입력 원문 보존 확인'==row[1] for row in book['02_출장_기본정보'].iter_rows(values_only=True) if len(row)>1)
     assert len(doc.part.rels)>5
 
 def test_raw_text_is_not_an_excel_formula():
     t=trip();t.meta['비고']='=HYPERLINK("https://example.com")'
     book=load_workbook(BytesIO(export_excel(calculate(t))),data_only=False)
-    target=[c for row in book.worksheets[1] for c in row if c.value==t.meta['비고']][0]
+    target=[c for row in book['02_출장_기본정보'] for c in row if c.value==t.meta['비고']][0]
     assert target.data_type=='s'
 
 def test_storage_preserves_versions_and_decimal(tmp_path):

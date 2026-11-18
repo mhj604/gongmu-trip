@@ -27,14 +27,27 @@ h1 {font-size:1.65rem!important;font-weight:700!important;line-height:1.4!import
 .result-breakdown {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.5rem;border-top:1px solid #edf0f4;padding-top:.85rem;margin-top:.35rem;}
 .result-breakdown span {display:block;color:#8791a0;font-size:.74rem;margin-bottom:.25rem;}
 .result-breakdown strong {display:block;font-size:.95rem;font-weight:600;letter-spacing:-.025em;font-variant-numeric:tabular-nums;}
-.batch-row {display:flex;justify-content:space-between;gap:1rem;align-items:center;border-bottom:1px solid #edf0f4;padding:.6rem 0;font-size:.85rem;}
-.batch-row small {display:block;font-size:.72rem;color:#8791a0;margin-top:.2rem;}
-.batch-row strong {white-space:nowrap;font-size:.9rem;}
+.trip-cost-card {border:1px solid #e5eaf1;border-radius:12px;padding:18px 20px;background:#fff;min-width:0;}
+.trip-cost-card header {display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:12px;align-items:center;}
+.trip-number {display:grid;place-items:center;width:30px;height:30px;border-radius:9px;background:#eef3fc;color:#3563af;font-size:.8rem;font-weight:700;}
+.trip-identity {min-width:0;}
+.trip-identity strong {display:block;font-size:.93rem;line-height:1.5;overflow-wrap:anywhere;}
+.trip-identity span,.trip-total span {display:block;color:#8791a0;font-size:.72rem;line-height:1.6;}
+.trip-total {text-align:right;}
+.trip-total strong {display:block;color:#245ec7;font-size:1.06rem;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.trip-cost-card .result-breakdown {margin-top:15px;padding-top:14px;gap:12px;}
+.trip-cost-card .result-breakdown strong {font-size:1rem;white-space:nowrap;}
 @media(max-width:600px) {
  .block-container {padding:4.25rem 1rem 1.5rem;}
  .st-key-inputs,.st-key-result {padding:1rem!important;}
  .result-amount {font-size:2.15rem;}
  .result-breakdown strong {font-size:.84rem;}
+ .trip-cost-card {padding:16px;}
+ .trip-cost-card header {grid-template-columns:26px minmax(0,1fr);gap:10px;}
+ .trip-number {width:26px;height:26px;}
+ .trip-total {grid-column:2;text-align:left;}
+ .trip-total span {display:none;}
+ .trip-cost-card .result-breakdown {grid-template-columns:repeat(2,minmax(0,1fr));row-gap:14px;}
 }
 @media(max-width:370px) {
  .result-breakdown {grid-template-columns:repeat(2,minmax(0,1fr));gap:.8rem;}
