@@ -8,6 +8,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from .models import *
 from .report import flatten,metadata,deadlines,status_label,period
+from .shared_lodging import allocation, SCOPE_NOTE
 
 NAVY='182F4D'; TEAL='087F8C'
 
@@ -91,6 +92,13 @@ def append_result(doc, result, title=None):
         shade(cell,'DCF0EF')
         for p in cell.paragraphs:
             for r in p.runs:r.bold=True
+    shared=allocation(result)
+    if shared:
+        doc.add_heading('공동숙박 분담 내역',2)
+        doc.add_paragraph(SCOPE_NOTE+' 숙박비 분담액 합계 '+money(sum((r['분담액'] for r in shared),ZERO))+'. 위 정산 총괄에 이미 포함된 금액입니다.')
+        table(doc,['정산 대상·등급','숙박','분담액','상한','예상 인정액'],
+            [[r['정산 대상']+'\n'+r['지급 등급'],str(r['숙박일'])+'박',r['분담액'],r['상한'],r['예상 인정액']] for r in shared],
+            [5.2,1.3,3.7,3.7,3.7])
     doc.add_heading('4 항목별 상세 계산',1)
     for cat in CATEGORIES:
         items=[r for r in result.lines if r.category==cat]

@@ -11,6 +11,7 @@ from openpyxl.worksheet.page import PageMargins
 from openpyxl.formatting.rule import CellIsRule
 from .models import *
 from .report import flatten,metadata,deadlines,status_label
+from .shared_lodging import allocation, SCOPE_NOTE
 
 NAVY='182F4D'
 TEAL='087F8C'
@@ -76,6 +77,22 @@ def sheet(wb,name,title,headers,rows,widths=None,currency_columns=()):
     ws.oddHeader.right.text='공무 출장비 정산서'
     return ws
 
+def shared_lodging_sheet(wb, results, name):
+    rows=[]
+    for i,result in enumerate(results,1):
+        trip_name=f'{i}. '+(result.trip['meta'].get('출장명') or '출장')
+        for r in allocation(result):
+            rows.append([trip_name,r['정산 대상'],r['지급 등급'],r['숙박일'],r['분담액'],
+                         r['상한'],r['예상 인정액'],r['상태']])
+    if not rows:
+        return
+    total=sum((row[4] for row in rows),ZERO)
+    ws=sheet(wb,name,'공동숙박 분담 · 총액 '+money(total),
+        ['출장','정산 대상','지급 등급','숙박일수','분담액','상한','예상 인정액','상태'],
+        rows,[26,30,13,11,18,18,18,26],(5,6,7))
+    ws.cell(2,1,SCOPE_NOTE+' 분담액은 영수증 총액을 나눈 금액이며 요약에 이미 포함되어 있습니다.')
+
+
 def export_excel(result:Result)->bytes:
     wb=Workbook(); wb.remove(wb.active)
     rows=[]
@@ -120,6 +137,7 @@ def export_excel(result:Result)->bytes:
     review += [[p,v] for p,v in flatten(result.trip['evidence'],'증빙')]
     review += [[p,v] for p,v in flatten(result.trip['fx'],'환율')]
     sheet(wb,'09_정산_검토','증빙과 승인 및 정산기한',['구분','내용'],review,[42,88])
+    shared_lodging_sheet(wb,[result],'10_공동숙박_분담')
     wb.active=0
     buff=BytesIO();wb.save(buff)
     # 단순 합계 수식의 캐시를 함께 저장한다. 미계산 뷰어에서도 총액이 비지 않는다.

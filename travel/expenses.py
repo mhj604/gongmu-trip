@@ -79,7 +79,11 @@ def lodging(ctx):
             ctx.line('숙박비','무료 또는 미숙박',day,amount=ZERO,status=EXCLUDED,reference=ref,
                      notes='실제 숙박이 없거나 숙박비가 발생하지 않음')
             continue
-        effective_group=row.get('동행조정등급') or group
+        person_id=row.get('숙박정산대상ID', '') if not overseas else ''
+        person_group=(row.get('숙박지급등급') or group) if person_id else group
+        if person_group not in ctx.rules['overseas_rates']:
+            ctx.line('숙박비','숙박 정산 대상 등급 확인',day,status=REVIEW,reference=ref);continue
+        effective_group=row.get('동행조정등급') or person_group
         if overseas:
             rates,reason=rates_for(ctx,row,effective_group)
             if not rates:
@@ -127,7 +131,7 @@ def lodging(ctx):
         if row.get('실제지출액') in ('',None):
             ctx.line('숙박비','숙박 지출액 미입력',day,cap,status=REVIEW,reference=ref);continue
         status=receipt_status(row)
-        if effective_group!=group and not(row.get('승인') and row.get('승인근거')): status=APPROVAL
+        if effective_group!=person_group and not(row.get('승인') and row.get('승인근거')): status=APPROVAL
         if row.get('기관직접결제'):
             ctx.line('숙박비','기관 직접결제 숙박',day,cap,actual,ZERO,EXCLUDED,reference=ref,
                      notes='기관 부담 숙박은 개인 청구와 상한 풀에서 제외');continue
@@ -137,6 +141,13 @@ def lodging(ctx):
         line.currency=currency
         line.foreign_amount=actual if overseas else None
         line.rate=actual_rate if overseas else Decimal(1)
+        if person_id:
+            line.lodging_person_id=person_id
+            line.lodging_person_name=row.get('숙박정산대상') or person_id
+            line.lodging_person_group=person_group
+            line.name='공동숙박 · '+line.lodging_person_name
+            line.formula='사람별 실제 순지출 합계와 해당 사람의 숙박일별 상한 합계 중 작은 금액을 배분'
+            line.notes+='; '+str(row.get('배분설명',''))+'; 공동 출장자는 숙박비만 정산'
         if overseas:
             foreign_pool[id(line)]={'usd_actual':usd_actual,'usd_cap':usd_cap,'cap_rate':cap_rate}
             line.notes+=f'; USD 비교액 {usd_actual}, USD 상한 {usd_cap}; 결제수단 {row.get("결제수단","개인카드")}'
@@ -153,8 +164,8 @@ def lodging(ctx):
                 'USD',amount,True,notes=str(ctx.trip.meta.get('할인정액승인근거','')))
         return
     # 근거/증빙 미완료인 숙박은 확정된 풀과 혼합하지 않는다.
-    for status in {r[3].status for r in records}:
-        pool=[r for r in records if r[3].status==status]
+    for status,person in dict.fromkeys((r[3].status,r[3].lodging_person_id or 'self') for r in records):
+        pool=[r for r in records if (r[3].status,r[3].lodging_person_id or 'self')==(status,person)]
         actual_total=sum((r[2] for r in pool),ZERO)
         base_cap=sum((r[1] if r[1] is not None else r[2] for r in pool),ZERO)
         allowed=min(actual_total,base_cap)
@@ -193,7 +204,11 @@ def lodging(ctx):
                 if row.get('동행조정등급'):
                     extra_status=REVIEW
                 else: extra_status=receipt_status(row,True)
-                ctx.line('숙박비','숙박비 초과 추가지급',day,amount=extra,status=extra_status,
+                extra_line=ctx.line('숙박비','숙박비 초과 추가지급',day,amount=extra,status=extra_status,
                     formula=f'미충당 초과액과 상한 {cap} × {"50%" if overseas else "30%"} 중 작은 금액',
                     reference=ref+'·제16조제1·2항',notes=str(row.get('승인근거','')))
+                extra_line.lodging_person_id=line.lodging_person_id
+                extra_line.lodging_person_name=line.lodging_person_name
+                extra_line.lodging_person_group=line.lodging_person_group
+                if line.lodging_person_id: extra_line.name+=' · '+line.lodging_person_name
                 excess-=extra

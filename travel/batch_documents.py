@@ -7,7 +7,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 from .models import CATEGORIES, money
 from .report import flatten, deadlines
-from .excel import sheet, safe_value, MONEY, NAVY
+from .excel import sheet, safe_value, MONEY, NAVY, shared_lodging_sheet
 from .word import new_document, append_result, table
 
 
@@ -62,6 +62,7 @@ def export_batch_excel(batch):
           ['번호','출장명','입력 경로','입력값'],raw,[7,24,50,85])
     sheet(wb,'04_정산_확인','출장별 정산 사유와 기한',
           ['번호','출장명','구분','내용'],review,[7,24,42,95])
+    shared_lodging_sheet(wb,batch.results,'05_공동숙박_분담')
     wb.active = 0
     buffer = BytesIO()
     wb.save(buffer)

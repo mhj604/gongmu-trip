@@ -78,10 +78,14 @@ class Line:
     rate: Decimal | None = None
     notes: str = ''
     rule_version: str = ''
+    lodging_person_id: str = ''
+    lodging_person_name: str = ''
+    lodging_person_group: str = ''
 
     def record(self):
         return dict(zip(['항목','내역','일자','기준금액(원)','실제지출액(원)','인정금액(원)',
-                         '상태','계산식','적용근거','출처','통화','외화금액','환율','비고','규칙버전'], asdict(self).values()))
+                         '상태','계산식','적용근거','출처','통화','외화금액','환율','비고','규칙버전',
+                         '숙박정산대상ID','숙박정산대상','숙박지급등급'], asdict(self).values()))
 
 @dataclass
 class Result:

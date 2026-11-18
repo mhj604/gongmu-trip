@@ -18,6 +18,7 @@ from .money_input import amount_input
 from .batch import BatchResult, calculate_batch
 from .batch_documents import export_batch_excel, export_batch_word
 from .ui_theme import apply_theme
+from .shared_lodging import allocation, SCOPE_NOTE
 
 GROUPS=['제2호','제1호라','제1호다','제1호나','제1호가']
 DAY={'일자':'','국가':'대한민국','도시':'','업무일정':'','이동일정':'','여비인정일':True,
@@ -33,6 +34,7 @@ LODGING={'숙박일':'','국가':'대한민국','도시':'','지역구분':'기�
          '무료숙박':False,'기관직접결제':False,'초과신청':False,'증빙확인':False,'승인':False,
          '승인근거':'','동행조정등급':'','주간숙박사유':'','환율ID':'','최인접수도국가':'','거리근거':''}
 LODGING.update({'결제수단':'개인카드','카드청구원화액':'','1USD당현지통화':'','현지환율기준일':'','현지환율출처':'','현금사용사유':''})
+LODGING.update({'숙박정산대상ID':'','숙박정산대상':'','숙박지급등급':''})
 TRANSPORT={'일자':'','교통수단':'철도','출발지':'','도착지':'','좌석등급':'일반실','실제지출액':'','통화':'KRW',
            '할인액':'','기관부담액':'','지원액':'','기관직접결제':False,'증빙확인':False,'승인':False,'승인근거':'',
            '대중교통운임':'','운임출처':'','부득이한사유':'','거리(km)':'','거리출처':'','유종':'휘발유','유가':'',
@@ -99,6 +101,7 @@ def editor(trip, attr, template, visible):
     selections = {'지역구분': ['서울','광역시','기타'], '교통수단': ['철도','버스','항공','선박','자가용','공무용차량','무료교통','택시','기타'],
                   '결제수단': ['개인카드','현금','국내원화예약'],
                   '자가용정산방식':['','대중교통 운임','연료비'], '유종':list(load_rules()['fuel_efficiency'])}
+    selections['숙박지급등급'] = [''] + GROUPS
     for column, options in selections.items():
         if column in configs:
             configs[column] = st.column_config.SelectboxColumn(column, options=options, default=template.get(column, options[0]))
@@ -204,6 +207,8 @@ def quick_fields(trip, nights):
         with b:
             if trip.kind == '국내':
                 select(trip, '간편지역', '숙박 지역', ['기타','서울','광역시'])
+        if trip.kind == '국내':
+            shared_lodging_fields(trip)
     a, b = st.columns(2)
     with a:
         mode = select(trip,'간편교통수단','교통수단',['철도','버스','항공','선박','자가용','없음'])
@@ -214,6 +219,29 @@ def quick_fields(trip, nights):
         car_fields(trip)
     if trip.kind == '국외':
         st.caption('숙박·교통비는 원화 합계로 입력하세요.')
+
+
+def shared_lodging_fields(trip):
+    m = trip.meta
+    m['공동숙박'] = st.toggle('공동 출장자 숙박비 함께 정산',value=m.get('공동숙박',False),key=key(trip,'shared_lodging'))
+    if not m['공동숙박']:
+        return
+    a, b = st.columns(2)
+    with a:
+        m['공동숙박인원'] = st.number_input('숙박 인원 (본인 포함)',min_value=2,max_value=20,
+                value=int(m.get('공동숙박인원',2)),step=1,key=key(trip,'shared_count'))
+    with b:
+        with st.popover('동행자 이름·등급',width='stretch'):
+            saved = m.get('공동숙박자',[])
+            people = []
+            for i in range(m['공동숙박인원']-1):
+                person = saved[i] if i < len(saved) else {}
+                name = st.text_input(f'동행 {i+1} 성명 (선택)',value=person.get('성명',''),key=key(trip,f'shared_name_{i}'))
+                grade = person.get('지급등급') or m.get('지급등급','제2호')
+                group = st.selectbox(f'동행 {i+1} 지급 등급',GROUPS,index=GROUPS.index(grade) if grade in GROUPS else 0,key=key(trip,f'shared_grade_{i}'))
+                people.append({'성명':name,'지급등급':group})
+            m['공동숙박자'] = people
+    st.caption('위 숙박비에는 객실 영수증 총액을 한 번만 입력하세요. 같은 기간·지역에 함께 숙박한 공무 출장자만 포함합니다. '+SCOPE_NOTE)
 
 
 def payment_group(trip):
@@ -327,7 +355,11 @@ def detail_fields(trip):
     with tabs[0]:
         editor(trip,'days',DAY,['일자','국가','도시','여비인정일','동일행정구역','왕복거리(km)','거리출처','출장시간(h)','공무용차량','식비지원액','도착다음날기산일수'])
     with tabs[1]:
-        editor(trip,'lodgings',LODGING,['숙박일','국가','도시','지역구분','실제숙박','실제지출액','통화','결제수단','카드청구원화액','1USD당현지통화','현지환율기준일','현지환율출처','현금사용사유','무료숙박','증빙확인'])
+        shared = any(r.get('숙박정산대상ID') for r in trip.lodgings)
+        people_columns = ['숙박정산대상ID','숙박정산대상','숙박지급등급'] if shared else []
+        editor(trip,'lodgings',LODGING,['숙박일',*people_columns,'국가','도시','지역구분','실제숙박','실제지출액','통화','결제수단','카드청구원화액','1USD당현지통화','현지환율기준일','현지환율출처','현금사용사유','무료숙박','증빙확인'])
+        if shared:
+            st.caption('실제지출액은 각 사람의 분담액입니다. 영수증 총액을 사람마다 반복 입력하지 마세요. 정산대상ID가 같은 행끼리 숙박 상한을 계산합니다. '+SCOPE_NOTE)
     with tabs[2]:
         car_columns = st.toggle('자가용 입력란 표시',value=any(r.get('교통수단')=='자가용' for r in trip.transports),key=key(trip,'car_columns'))
         visible = ['일자','교통수단','출발지','도착지','좌석등급','실제지출액','통화','기관직접결제','증빙확인']
@@ -470,7 +502,7 @@ def render_result(trip, result, nights):
 def result_details(store, trip, result, batch=None):
     st.caption('예상액에는 승인·증빙 확인 전 금액도 포함됩니다. 확정 청구액 '+money(result.claim))
     if result.lines:
-        st.dataframe(pd.DataFrame([{'항목':r.category,'일자':r.date,'금액':money(r.amount),'상태':r.status,'계산식':r.formula} for r in result.lines]),hide_index=True,width='stretch')
+        st.dataframe(pd.DataFrame([{'항목':r.category,'내역':r.name,'일자':r.date,'금액':money(r.amount),'상태':r.status,'계산식':r.formula} for r in result.lines]),hide_index=True,width='stretch')
     for issue in result.issues:
         st.caption('• '+issue)
     if batch is not None and (len(batch.results)>1 or st.session_state.get('batch_group')):
@@ -615,5 +647,14 @@ def run():
             render_batch_result(store,batch)
         else:
             render_result(trip,result,nights)
+        shared = allocation(result)
+        if shared:
+            st.caption(('현재 출장 · ' if batch_mode else '')+SCOPE_NOTE)
+            with st.expander('숙박비 분담 내역'):
+                st.caption('숙박비 분담액 합계 '+money(sum((row['분담액'] for row in shared),ZERO)))
+                st.dataframe(pd.DataFrame([{'정산 대상':r['정산 대상'],'지급 등급':r['지급 등급'],
+                    '숙박':str(r['숙박일'])+'박','분담액':money(r['분담액']),
+                    '상한':money(r['상한']) if isinstance(r['상한'],Decimal) else r['상한'],
+                    '예상 인정액':money(r['예상 인정액'])} for r in shared]),hide_index=True,width='stretch')
     with report_area:
         result_details(store,trip,result,batch)

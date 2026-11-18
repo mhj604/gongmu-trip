@@ -75,9 +75,11 @@ def calculate(trip:Trip,rules=None)->Result:
         d=expenses.expense_date(ctx,row)
         if not row.get('숙박일'):
             ctx.line('숙박비','숙박일 미입력',d,status=REVIEW,reference='제16조제4항');continue
-        if d in lodging_dates:
-            result.issues.append(f'{d}: 숙박 중복. 숙박 1건으로 합산하세요.');continue
-        lodging_dates.add(d)
+        person = (row.get('숙박정산대상ID') or 'self') if trip.kind == '국내' else ''
+        lodging_key = (d, person)
+        if lodging_key in lodging_dates:
+            result.issues.append(f'{d}: 숙박 중복. 같은 사람의 숙박은 1건으로 합산하세요.');continue
+        lodging_dates.add(lodging_key)
         if d in local_dates:
             ctx.line('숙박비','근무지 내 별도숙박',d,amount=ZERO,status=EXCLUDED,reference='지침 Ⅲ.2');continue
         if d in unresolved_dates:

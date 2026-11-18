@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from decimal import Decimal, ROUND_DOWN
 from .models import Trip, ZERO, REVIEW, EXCLUDED, dec
 from .engine import calculate
+from .shared_lodging import participants, split_amount
 
 
 def build_schedule(trip):
@@ -34,6 +35,21 @@ def build_schedule(trip):
                       '입력방식': '출장 전체 숙박비 합계',
                       '배분설명': '계산을 위한 균등배분. 일별 실제 지출은 상세 입력에서 작성.'}
                      for i in range(nights)] if total and not local else []
+    if trip.kind == '국내' and not local and nights and m.get('공동숙박'):
+        people = participants(m)
+        if total != total.to_integral_value():
+            raise ValueError('공동숙박 영수증 총액은 원 단위로 입력하세요.')
+        trip.lodgings = []
+        for person, amount in zip(people, split_amount(total, len(people))):
+            for i, daily in enumerate(split_amount(amount, nights)):
+                trip.lodgings.append({**place, '숙박일': str(start+timedelta(days=i)),
+                    '지역구분': m.get('간편지역', '기타'), '실제숙박': True,
+                    '실제지출액': str(daily), '통화': 'KRW', '결제수단': '국내원화예약',
+                    '증빙확인': False, '숙박정산대상ID': person['id'],
+                    '숙박정산대상': person['name'], '숙박지급등급': person['group'],
+                    '입력방식': '공동숙박 영수증 총액의 사람별 분담',
+                    '배분설명': f'영수증 총액 {total}원 / {len(people)}명, 본인 포함. '
+                              '사람별 분담액을 숙박일에 균등배분하고 마지막 행에 원 단위 나머지 배정.'})
     fare = ZERO if m.get('간편교통수단') == '없음' else dec(m.get('간편교통비'))
     trip.transports = [{'일자': str(start), '교통수단': m.get('간편교통수단', '철도'),
                         '좌석등급': '이코노미' if m.get('간편교통수단') == '항공' else '일반실',
