@@ -429,23 +429,12 @@ def render_batch_result(store, batch):
     parts = ['<div><span>'+cat+'</span><strong>'+escape(money(batch.category(cat)))+'</strong></div>'
              for cat in ['일비','식비','숙박비','교통비']]
     st.markdown('<div class="result-breakdown">'+''.join(parts)+'</div>',unsafe_allow_html=True)
-    st.caption('출장별 세부 내역')
+    st.caption('출장별 비용')
     for row, result in zip(batch.rows(), batch.results):
         with st.container(border=True, key='batch_detail_'+result.trip['id']):
             st.markdown('<div class="batch-row"><span>'+escape(str(row['번호'])+'. '+row['출장명'])+
                         '<small>'+escape(row['출발일']+' ~ '+row['복귀일'])+'</small></span><strong>'+escape(money(row['예상 출장비']))+'</strong></div>',unsafe_allow_html=True)
             render_cost_breakdown(result)
-            extras = [line for line in result.lines if line.category=='기타 인정 여비' and line.status!=EXCLUDED]
-            if extras:
-                st.caption('기타 인정 여비 '+money(sum((line.amount or ZERO for line in extras),ZERO)))
-            missing = missing_quick_inputs(Trip.from_dict(result.trip))
-            if missing:
-                st.info(' · '.join(missing)+' 입력이 필요합니다.')
-            st.caption('예상액에는 승인·증빙 확인 전 금액도 포함됩니다. 확정 청구액 '+money(result.claim))
-            if result.advance:
-                st.caption('기지급액 '+money(result.advance)+' · 반납예정액 '+money(result.refund))
-            render_line_details(result)
-            render_shared_lodging(result)
     if incomplete:
         st.info('입력이 필요한 출장이 있습니다. 각 출장에서 빠진 항목을 확인하세요.')
     save, excel, word = st.columns(3)
