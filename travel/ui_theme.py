@@ -5,6 +5,7 @@ CSS = '''<style>
 .stApp {background:#f7f8fa;color:#202c3b;}
 .stApp,input,textarea,button {font-family:"Pretendard","Apple SD Gothic Neo","Malgun Gothic",sans-serif;}
 .block-container {max-width:760px;padding:4.5rem 1.5rem 2rem;}
+[data-testid="stMain"] {scroll-padding-bottom:calc(6rem + env(safe-area-inset-bottom,0px));}
 [data-testid="stHeader"] {background:rgba(247,248,250,.96);}
 [data-testid="stAppDeployButton"] {display:none;}
 h1 {font-size:1.65rem!important;font-weight:700!important;line-height:1.4!important;letter-spacing:-.045em;padding:.1rem 0!important;}
@@ -38,6 +39,7 @@ h1 {font-size:1.65rem!important;font-weight:700!important;line-height:1.4!import
 @media(max-width:370px) {
  .result-breakdown {grid-template-columns:repeat(2,minmax(0,1fr));gap:.8rem;}
 }
+.block-container {padding-bottom:calc(6rem + env(safe-area-inset-bottom,0px));}
 </style>'''
 
 

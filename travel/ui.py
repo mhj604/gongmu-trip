@@ -429,9 +429,23 @@ def render_batch_result(store, batch):
     parts = ['<div><span>'+cat+'</span><strong>'+escape(money(batch.category(cat)))+'</strong></div>'
              for cat in ['일비','식비','숙박비','교통비']]
     st.markdown('<div class="result-breakdown">'+''.join(parts)+'</div>',unsafe_allow_html=True)
-    for row in batch.rows():
-        st.markdown('<div class="batch-row"><span>'+escape(str(row['번호'])+'. '+row['출장명'])+
-                    '<small>'+escape(row['출발일']+' ~ '+row['복귀일'])+'</small></span><strong>'+escape(money(row['예상 출장비']))+'</strong></div>',unsafe_allow_html=True)
+    st.caption('출장별 세부 내역')
+    for row, result in zip(batch.rows(), batch.results):
+        with st.container(border=True, key='batch_detail_'+result.trip['id']):
+            st.markdown('<div class="batch-row"><span>'+escape(str(row['번호'])+'. '+row['출장명'])+
+                        '<small>'+escape(row['출발일']+' ~ '+row['복귀일'])+'</small></span><strong>'+escape(money(row['예상 출장비']))+'</strong></div>',unsafe_allow_html=True)
+            render_cost_breakdown(result)
+            extras = [line for line in result.lines if line.category=='기타 인정 여비' and line.status!=EXCLUDED]
+            if extras:
+                st.caption('기타 인정 여비 '+money(sum((line.amount or ZERO for line in extras),ZERO)))
+            missing = missing_quick_inputs(Trip.from_dict(result.trip))
+            if missing:
+                st.info(' · '.join(missing)+' 입력이 필요합니다.')
+            st.caption('예상액에는 승인·증빙 확인 전 금액도 포함됩니다. 확정 청구액 '+money(result.claim))
+            if result.advance:
+                st.caption('기지급액 '+money(result.advance)+' · 반납예정액 '+money(result.refund))
+            render_line_details(result)
+            render_shared_lodging(result)
     if incomplete:
         st.info('입력이 필요한 출장이 있습니다. 각 출장에서 빠진 항목을 확인하세요.')
     save, excel, word = st.columns(3)
@@ -473,6 +487,34 @@ def missing_quick_inputs(trip):
     return missing
 
 
+def render_cost_breakdown(result):
+    breakdown = []
+    for category in ['일비','식비','숙박비','교통비']:
+        lines = [line for line in result.lines if line.category == category and line.status != EXCLUDED]
+        amount = sum((line.amount or ZERO for line in lines),ZERO)
+        value = '입력 필요' if any(line.amount is None for line in lines) else money(amount)
+        breakdown.append('<div><span>'+category+'</span><strong>'+escape(value)+'</strong></div>')
+    st.markdown('<div class="result-breakdown">'+''.join(breakdown)+'</div>',unsafe_allow_html=True)
+
+
+def render_line_details(result):
+    if result.lines:
+        st.dataframe(pd.DataFrame([{'항목':r.category,'내역':r.name,'일자':r.date,'금액':money(r.amount),
+            '상태':r.status,'계산식':r.formula} for r in result.lines]),hide_index=True,width='stretch')
+
+
+def render_shared_lodging(result):
+    shared = allocation(result)
+    if not shared:
+        return
+    st.caption(SCOPE_NOTE)
+    st.caption('숙박비 분담액 합계 '+money(sum((row['분담액'] for row in shared),ZERO)))
+    st.dataframe(pd.DataFrame([{'정산 대상':r['정산 대상'],'지급 등급':r['지급 등급'],
+        '숙박':str(r['숙박일'])+'박','분담액':money(r['분담액']),
+        '상한':money(r['상한']) if isinstance(r['상한'],Decimal) else r['상한'],
+        '예상 인정액':money(r['예상 인정액'])} for r in shared]),hide_index=True,width='stretch')
+
+
 def render_result(trip, result, nights):
     missing = missing_quick_inputs(trip)
     incomplete = missing or any(line.amount is None and line.status != EXCLUDED for line in result.lines)
@@ -482,13 +524,7 @@ def render_result(trip, result, nights):
                 '<div class="result-amount">'+escape(money(result.estimated))+'</div>',unsafe_allow_html=True)
     local = trip.kind == '국내' and not trip.meta.get('_상세입력') and trip.meta.get('간편출장범위') == '근무지 내'
     if not local:
-        breakdown = []
-        for category in ['일비','식비','숙박비','교통비']:
-            lines = [line for line in result.lines if line.category == category and line.status != EXCLUDED]
-            amount = sum((line.amount or ZERO for line in lines),ZERO)
-            value = '입력 필요' if any(line.amount is None for line in lines) else money(amount)
-            breakdown.append('<div><span>'+category+'</span><strong>'+escape(value)+'</strong></div>')
-        st.markdown('<div class="result-breakdown">'+''.join(breakdown)+'</div>',unsafe_allow_html=True)
+        render_cost_breakdown(result)
     if missing:
         st.info(' · '.join(missing)+' 입력이 필요합니다.')
     elif incomplete:
@@ -501,8 +537,7 @@ def render_result(trip, result, nights):
 
 def result_details(store, trip, result, batch=None):
     st.caption('예상액에는 승인·증빙 확인 전 금액도 포함됩니다. 확정 청구액 '+money(result.claim))
-    if result.lines:
-        st.dataframe(pd.DataFrame([{'항목':r.category,'내역':r.name,'일자':r.date,'금액':money(r.amount),'상태':r.status,'계산식':r.formula} for r in result.lines]),hide_index=True,width='stretch')
+    render_line_details(result)
     for issue in result.issues:
         st.caption('• '+issue)
     if batch is not None and (len(batch.results)>1 or st.session_state.get('batch_group')):
@@ -647,14 +682,8 @@ def run():
             render_batch_result(store,batch)
         else:
             render_result(trip,result,nights)
-        shared = allocation(result)
-        if shared:
-            st.caption(('현재 출장 · ' if batch_mode else '')+SCOPE_NOTE)
-            with st.expander('숙박비 분담 내역'):
-                st.caption('숙박비 분담액 합계 '+money(sum((row['분담액'] for row in shared),ZERO)))
-                st.dataframe(pd.DataFrame([{'정산 대상':r['정산 대상'],'지급 등급':r['지급 등급'],
-                    '숙박':str(r['숙박일'])+'박','분담액':money(r['분담액']),
-                    '상한':money(r['상한']) if isinstance(r['상한'],Decimal) else r['상한'],
-                    '예상 인정액':money(r['예상 인정액'])} for r in shared]),hide_index=True,width='stretch')
+            if allocation(result):
+                with st.expander('숙박비 분담 내역'):
+                    render_shared_lodging(result)
     with report_area:
         result_details(store,trip,result,batch)
