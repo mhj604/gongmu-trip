@@ -79,9 +79,35 @@ class Store:
         return trip
 
     def delete(self,id):
+        from .batch import BatchResult
         with self.connect() as db:
             db.execute('DELETE FROM revisions WHERE trip_id=?',(id,))
             db.execute('DELETE FROM trips WHERE id=?',(id,))
+            # 묶음을 다시 열었을 때 삭제한 출장이 되살아나지 않게 사본도 제거한다.
+            for identifier,payload in db.execute('SELECT id,batch_json FROM batches').fetchall():
+                batch=BatchResult.from_dict(json.loads(payload))
+                remaining=[r for r in batch.results if r.trip['id']!=id]
+                if len(remaining)==len(batch.results):continue
+                if not remaining:
+                    db.execute('DELETE FROM batches WHERE id=?',(identifier,))
+                    db.execute('DELETE FROM batch_revisions WHERE batch_id=?',(identifier,))
+                    continue
+                batch.results=remaining
+                db.execute('UPDATE batches SET count=?,updated_at=?,batch_json=? WHERE id=?',
+                    (len(remaining),now(),dumps(batch.to_dict()),identifier))
+                for revision,old_payload in db.execute('SELECT revision,batch_json FROM batch_revisions WHERE batch_id=?',(identifier,)).fetchall():
+                    old=BatchResult.from_dict(json.loads(old_payload))
+                    old.results=[r for r in old.results if r.trip['id']!=id]
+                    if old.results:
+                        db.execute('UPDATE batch_revisions SET batch_json=? WHERE revision=?',(dumps(old.to_dict()),revision))
+                    else:
+                        db.execute('DELETE FROM batch_revisions WHERE revision=?',(revision,))
+
+    def delete_batch(self,identifier):
+        """묶음 기록만 삭제한다. 개별 출장 기록은 남긴다."""
+        with self.connect() as db:
+            db.execute('DELETE FROM batch_revisions WHERE batch_id=?',(identifier,))
+            db.execute('DELETE FROM batches WHERE id=?',(identifier,))
 
     def preference(self,key,default=None):
         with self.connect() as db:

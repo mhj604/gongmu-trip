@@ -382,6 +382,8 @@ def detail_fields(trip):
 
 
 def reset_batch(trips, results=None, identifier=None, title=''):
+    for name in ('batch_pending_id','current_result','current_batch'):
+        st.session_state.pop(name,None)
     for trip in trips:
         for name in list(st.session_state):
             if name.startswith(trip.id+'_'):
@@ -415,6 +417,21 @@ def active_trip(identifier):
     clear_editors(trip)
     st.session_state.trip = trip
     st.session_state.original_rules = st.session_state.batch_rules.get(trip.id)
+
+
+def remove_trip_from_inputs(identifier):
+    """입력 중인 출장만 제거하고, 마지막 출장이라면 빈 새 입력을 연다."""
+    trips = st.session_state.batch_trips
+    index = next((i for i,t in enumerate(trips) if t.id == identifier),None)
+    if index is None:
+        return
+    removed = trips.pop(index)
+    clear_editors(removed)
+    st.session_state.batch_rules.pop(identifier,None)
+    if not trips:
+        st.session_state.batch_reset_requested = True
+    elif st.session_state.trip.id == identifier:
+        st.session_state.batch_pending_id = trips[min(index,len(trips)-1)].id
 
 
 def render_batch_result(store, batch):
@@ -555,6 +572,8 @@ def run():
     st.set_page_config(page_title='바른여비 · 출장비 계산기', page_icon=':material/work_outline:', layout='centered')
     apply_theme()
     store = Store()
+    if st.session_state.pop('batch_reset_requested',False):
+        reset_batch([default_trip(store)])
     if 'trip' not in st.session_state:
         st.session_state.trip = default_trip(store)
     trip = st.session_state.trip
@@ -575,6 +594,9 @@ def run():
     title, actions = st.columns([3,1])
     with title:
         st.title('출장비 계산기')
+    notice = st.session_state.pop('trip_notice',None)
+    if notice:
+        st.toast(notice)
     with actions:
         with st.popover('내 기록', width='stretch'):
             if st.button('새 계산', width='stretch'):
@@ -584,20 +606,39 @@ def run():
             records += [('trip',r[0],(r[1] or '제목 없는 출장')+' · '+r[3][:10]) for r in store.list()]
             if records:
                 chosen = st.selectbox('저장된 계산', records, format_func=lambda row:row[2])
-                if st.button('불러오기', width='stretch'):
+                edit_record, delete_record = st.columns(2)
+                if edit_record.button('불러와 수정', width='stretch'):
                     (load_batch if chosen[0]=='batch' else load_trip)(store,chosen[1])
+                if delete_record.button('기록 삭제',width='stretch',help='개별 출장을 삭제하면 저장된 묶음에서도 제외합니다. 묶음 기록만 삭제하면 개별 기록은 유지합니다.'):
+                    if chosen[0]=='batch':
+                        store.delete_batch(chosen[1])
+                        message = '묶음 기록을 삭제했습니다. 개별 출장 기록은 유지됩니다.'
+                    else:
+                        store.delete(chosen[1])
+                        remove_trip_from_inputs(chosen[1])
+                        message = '출장 기록을 삭제했습니다.'
+                    st.session_state.trip_notice = message
+                    st.rerun()
             else:
                 st.caption('저장된 계산이 없습니다.')
-    nav, add = st.columns([3,1])
+    nav, add, delete = st.columns([3,1,1],vertical_alignment='bottom')
     with nav:
-        if len(trips)>1:
-            labels = {t.id:f'{i}. '+(t.meta.get('출장명') or '출장 '+str(i)) for i,t in enumerate(trips,1)}
-            selected = st.selectbox('입력할 출장',[t.id for t in trips],index=next(i for i,t in enumerate(trips) if t.id==trip.id),
-                                    format_func=lambda identifier:labels[identifier],key='batch_selected',label_visibility='collapsed')
-        else:
-            selected = trip.id
+        labels = {t.id:f'{i}. '+(t.meta.get('출장명') or '출장 '+str(i))+' · '+t.meta.get('시작일시','')[:10] for i,t in enumerate(trips,1)}
+        if st.session_state.get('batch_selected') not in labels:
+            st.session_state.batch_selected = trip.id
+        selected = st.selectbox('입력할 출장',[t.id for t in trips],
+                                format_func=lambda identifier:labels[identifier],key='batch_selected')
+    if selected != trip.id:
+        active_trip(selected)
+        st.rerun()
     with add:
         add_requested = st.button('출장 추가',icon=':material/add:',width='stretch')
+    with delete:
+        if st.button('출장 삭제',icon=':material/delete_outline:',width='stretch',help='선택한 출장을 현재 계산에서 삭제합니다. 저장된 기록은 내 기록에서 삭제할 수 있습니다.'):
+            remove_trip_from_inputs(trip.id)
+            st.session_state.trip_notice = '선택한 출장을 삭제했습니다.'
+            st.rerun()
+    st.caption('수정할 출장을 선택한 뒤 아래 날짜·금액을 바꾸세요. 계산과 출력에 바로 반영됩니다.')
     kinds = ['국내','국외'] + (['특수'] if trip.kind == '특수' else [])
     kind = st.segmented_control('출장 유형',kinds,default=trip.kind,key=key(trip,'kind'),label_visibility='collapsed')
     if kind:
@@ -628,7 +669,6 @@ def run():
             if not manual:
                 trip.meta['간편공용차량'] = st.checkbox('공무용 차량 이용', value=trip.meta.get('간편공용차량',False),key=key(trip,'vehicle'))
             number(trip,'기지급액','이미 받은 금액 (원)')
-            remove_requested = len(trips)>1 and st.button('현재 출장을 묶음에서 제외',key=key(trip,'remove_batch'))
             local = trip.kind == '국내' and trip.meta.get('간편출장범위') == '근무지 내'
             if not manual and trip.meta.get('간편교통수단') == '자가용' and not local:
                 car_evidence_fields(trip)
@@ -653,15 +693,6 @@ def run():
         st.session_state.batch_group = True
         st.session_state.batch_pending_id = added.id
         st.rerun()
-    if remove_requested:
-        trips.remove(trip)
-        st.session_state.batch_rules.pop(trip.id,None)
-        st.session_state.batch_pending_id = trips[0].id
-        st.rerun()
-    if selected != trip.id:
-        active_trip(selected)
-        st.rerun()
-
     try:
         if not manual:
             build_schedule(trip)
