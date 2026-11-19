@@ -62,7 +62,7 @@ def test_adding_and_switching_trips_keeps_amounts_and_detail_edits():
     next(s for s in app.selectbox if s.label=='입력할 출장').select(first).run()
     assert not app.exception
     assert app.session_state.trip.days[0]['출장시간(h)'] == '7.5'
-    next(b for b in app.button if b.label=='출장 삭제').click().run()
+    next(b for b in app.button if b.key=='delete-trip-'+first).click().run()
     assert not app.exception
     assert len(app.session_state.current_batch.results) == 1
     assert any(b.label=='일괄 저장' for b in app.button)

@@ -17,7 +17,7 @@ from .fuel_prices import FuelQuote, FuelPriceError, fetch_quote, product_for, ap
 from .money_input import amount_input
 from .batch import BatchResult, calculate_batch
 from .batch_documents import export_batch_excel, export_batch_word
-from .ui_theme import apply_theme
+from .ui_theme import apply_theme, scroll_to_inputs
 from .shared_lodging import allocation, SCOPE_NOTE
 
 GROUPS=['제2호','제1호라','제1호다','제1호나','제1호가']
@@ -434,6 +434,42 @@ def remove_trip_from_inputs(identifier):
         st.session_state.batch_pending_id = trips[min(index,len(trips)-1)].id
 
 
+def edit_trip_from_result(identifier):
+    st.session_state.batch_pending_id = identifier
+    st.session_state.edit_scroll = uuid4().hex
+
+
+def delete_trip_from_result(identifier):
+    remove_trip_from_inputs(identifier)
+    st.session_state.trip_notice = '선택한 출장을 삭제했습니다.'
+
+
+def render_trip_controls(identifier):
+    with st.container(key='trip-actions-'+identifier):
+        edit, delete = st.columns(2,gap='small')
+        edit.button('수정',key='edit-trip-'+identifier,type='tertiary',width='stretch',
+                    on_click=edit_trip_from_result,args=(identifier,),help='이 출장의 입력란으로 이동합니다.')
+        delete.button('삭제',key='delete-trip-'+identifier,type='tertiary',width='stretch',
+                      on_click=delete_trip_from_result,args=(identifier,),help='이 출장을 현재 계산에서 삭제합니다. 저장 기록은 내 기록에서 관리합니다.')
+
+
+def render_trip_card(trip, number, result=None):
+    meta=trip.meta
+    name=meta.get('출장명') or f'출장 {number}'
+    period=meta.get('시작일시','')[:10]+' ~ '+meta.get('종료일시','')[:10]
+    amount=money(result.estimated) if result is not None else '입력 확인 필요'
+    with st.container(key='trip-card-'+trip.id):
+        heading, tools=st.columns([4,1.2],vertical_alignment='center')
+        with heading:
+            st.markdown('<header class="trip-card-heading"><span class="trip-number">'+str(number)+'</span>'
+                '<div class="trip-identity"><strong>'+escape(name)+'</strong><span>'+escape(period)+'</span></div>'
+                '<div class="trip-total"><span>예상 출장비</span><strong>'+escape(amount)+'</strong></div></header>',unsafe_allow_html=True)
+        with tools:
+            render_trip_controls(trip.id)
+        if result is not None:
+            render_cost_breakdown(result)
+
+
 def render_batch_result(store, batch):
     incomplete = batch.incomplete or any(missing_quick_inputs(Trip.from_dict(r.trip)) for r in batch.results)
     label = '전체 입력한 항목 합계' if incomplete else '전체 예상 출장비'
@@ -444,10 +480,7 @@ def render_batch_result(store, batch):
     st.markdown('<div class="result-breakdown">'+''.join(parts)+'</div>',unsafe_allow_html=True)
     st.caption('출장별 비용')
     for row, result in zip(batch.rows(), batch.results):
-        st.markdown('<article class="trip-cost-card"><header><span class="trip-number">'+str(row['번호'])+'</span>'
-            '<div class="trip-identity"><strong>'+escape(row['출장명'])+'</strong><span>'+escape(row['출발일']+' ~ '+row['복귀일'])+'</span></div>'
-            '<div class="trip-total"><span>예상 출장비</span><strong>'+escape(money(row['예상 출장비']))+'</strong></div></header>'
-            '<div class="result-breakdown">'+cost_breakdown_html(result)+'</div></article>',unsafe_allow_html=True)
+        render_trip_card(Trip.from_dict(result.trip),row['번호'],result)
     if incomplete:
         st.info('입력이 필요한 출장이 있습니다. 각 출장에서 빠진 항목을 확인하세요.')
     save, excel, word = st.columns(3)
@@ -527,8 +560,12 @@ def render_result(trip, result, nights):
     incomplete = missing or any(line.amount is None and line.status != EXCLUDED for line in result.lines)
     label = '입력한 항목 합계' if incomplete else '예상 출장비'
     duration = '당일' if nights == 0 else f'{nights}박 {nights+1}일'
-    st.markdown('<div class="result-heading"><span>'+label+'</span><span>'+duration+'</span></div>'
-                '<div class="result-amount">'+escape(money(result.estimated))+'</div>',unsafe_allow_html=True)
+    heading, tools=st.columns([4,1.2],vertical_alignment='center')
+    with heading:
+        st.markdown('<div class="result-heading"><span>'+label+'</span><span>'+duration+'</span></div>'
+                    '<div class="result-amount">'+escape(money(result.estimated))+'</div>',unsafe_allow_html=True)
+    with tools:
+        render_trip_controls(trip.id)
     local = trip.kind == '국내' and not trip.meta.get('_상세입력') and trip.meta.get('간편출장범위') == '근무지 내'
     if not local:
         render_cost_breakdown(result)
@@ -584,7 +621,8 @@ def run():
         st.session_state.batch_rules = {trip.id:st.session_state.original_rules} if st.session_state.get('original_rules') else {}
     if st.session_state.get('batch_pending_id'):
         target = st.session_state.pop('batch_pending_id')
-        active_trip(target)
+        if target != trip.id:
+            active_trip(target)
         st.session_state.batch_selected = target
         trip = st.session_state.trip
     trips = st.session_state.batch_trips
@@ -621,7 +659,7 @@ def run():
                     st.rerun()
             else:
                 st.caption('저장된 계산이 없습니다.')
-    nav, add, delete = st.columns([3,1,1],vertical_alignment='bottom')
+    nav, add = st.columns([3,1],vertical_alignment='bottom')
     with nav:
         labels = {t.id:f'{i}. '+(t.meta.get('출장명') or '출장 '+str(i))+' · '+t.meta.get('시작일시','')[:10] for i,t in enumerate(trips,1)}
         if st.session_state.get('batch_selected') not in labels:
@@ -633,12 +671,6 @@ def run():
         st.rerun()
     with add:
         add_requested = st.button('출장 추가',icon=':material/add:',width='stretch')
-    with delete:
-        if st.button('출장 삭제',icon=':material/delete_outline:',width='stretch',help='선택한 출장을 현재 계산에서 삭제합니다. 저장된 기록은 내 기록에서 삭제할 수 있습니다.'):
-            remove_trip_from_inputs(trip.id)
-            st.session_state.trip_notice = '선택한 출장을 삭제했습니다.'
-            st.rerun()
-    st.caption('수정할 출장을 선택한 뒤 아래 날짜·금액을 바꾸세요. 계산과 출력에 바로 반영됩니다.')
     kinds = ['국내','국외'] + (['특수'] if trip.kind == '특수' else [])
     kind = st.segmented_control('출장 유형',kinds,default=trip.kind,key=key(trip,'kind'),label_visibility='collapsed')
     if kind:
@@ -701,6 +733,10 @@ def run():
     except (ValueError, KeyError, TypeError, ArithmeticError) as error:
         with result_area:
             st.error('입력값을 확인하세요. '+str(error))
+            for i,item in enumerate(trips,1):
+                render_trip_card(item,i)
+        if st.session_state.get('edit_scroll'):
+            scroll_to_inputs(st.session_state.pop('edit_scroll'))
         return
     st.session_state.current_result = result
     st.session_state.current_batch = batch
@@ -715,3 +751,5 @@ def run():
                     render_shared_lodging(result)
     with report_area:
         result_details(trip,result,batch)
+    if st.session_state.get('edit_scroll'):
+        scroll_to_inputs(st.session_state.pop('edit_scroll'))
