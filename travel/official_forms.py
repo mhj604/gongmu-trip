@@ -9,6 +9,7 @@ from pathlib import Path
 from math import ceil
 from unicodedata import east_asian_width
 from .models import ZERO, CONFIRMED, EXCLUDED, money, dec
+from .report import ReportNumber, report_number
 
 SOURCE_URL='https://www.mpm.go.kr/mpm/info/resultPay/payBoard/?cntId=695&mode=view'
 PDF_URL='https://www.mpm.go.kr/board/file/bbs_0000000000000035/695/FILE_000000100073530/7aa6b30cca5926d04'
@@ -43,7 +44,9 @@ def block_heights(block,number):
         for c,value in enumerate(values):
             if (r,c) in covered:continue
             r1,c1=regions.get((r,c),(r,c))
-            text=money(value) if isinstance(value,Decimal) else str(value)
+            if isinstance(value,ReportNumber):
+                text=report_number(value.value,0 if value.krw else 2)+('원' if value.krw else '')
+            else:text=money(value) if isinstance(value,Decimal) else str(value)
             width=460*sum(block.widths[c:c1+1])/sum(block.widths)-7
             lines=sum(max(1,ceil(sum(2 if east_asian_width(ch) in ('W','F') else 1 for ch in line)*font*.55/max(width,10))) for line in text.split('\n'))
             required=lines*font*1.2+5
@@ -138,7 +141,7 @@ def foreign_forms(result):
     purpose=[['출장목적\n및\n정산방법',m.get('출장목적',''),'원화 환율\n(1USD : ₩)','식비','','숙박비','','',''],
         ['','','','정액지급','실비정산\n상한액의\n1/2추가정산','실비정산\n상한액 내','실비정산\n상한액의\n1/2추가정산','특례협의','할인정액'],
         ['', '', rate,*selections]]
-    purpose[0][2]+=('\n'+str(rate)) if rate else ''
+    purpose[0][2]+=('\n'+report_number(rate)) if rate else ''
     purpose[2][2]=''
     itinerary=[['출장일정','출장기간','출장국가','통화명','환율\n(1USD당)','환율 출처','환율적용 일자']]
     for country in dict.fromkeys(r.get('국가','') for r in result.trip['days']):
@@ -158,8 +161,10 @@ def foreign_forms(result):
     expenses=[['숙박비\n결제내역','일자','숙박업소명','결제방법','현지통화(ㄱ)','달러환산액(ㄴ)','원화환산액(ㄷ)']]
     for row in result.trip['lodgings']:
         line=next((r for r in hotel if r.date==row.get('숙박일')),None)
+        actual=row.get('실제지출액','')
+        if actual not in ('',None):actual=ReportNumber(dec(actual),row.get('통화')=='KRW')
         expenses.append(['',row.get('숙박일',''),row.get('숙박업소명',''),row.get('결제수단',''),
-            row.get('실제지출액',''),row.get('실제지출액','') if row.get('통화')=='USD' else '',
+            actual,actual if row.get('통화')=='USD' else '',
             line.actual if line and line.actual is not None else ''])
     if len(expenses)==1:expenses.append(['']*7)
     expenses.append(['','합 계','','','','',''])

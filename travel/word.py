@@ -8,7 +8,7 @@ from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from .models import *
-from .report import flatten,metadata,deadlines,status_label,period
+from .report import formatted_flatten as flatten,metadata,deadlines,status_label,period,ReportNumber,report_number,report_text
 from .shared_lodging import allocation, SCOPE_NOTE
 
 NAVY='243B57'; TEAL='245EC7'; FONT='맑은 고딕'
@@ -18,7 +18,9 @@ def shade(cell,color):
 
 def display(value):
     if value is None: return '미입력'
+    if isinstance(value,ReportNumber):return report_number(value.value,0 if value.krw else 2)+('원' if value.krw else '')
     if isinstance(value,Decimal): return money(value)
+    if isinstance(value,(int,float)) and not isinstance(value,bool):return report_number(value)
     return str(value)
 
 def table(doc,headers,rows,widths):
@@ -63,7 +65,7 @@ def table(doc,headers,rows,widths):
                 p.paragraph_format.space_before=Pt(1)
                 p.paragraph_format.line_spacing=1.15
                 p.paragraph_format.keep_with_next=False
-                if isinstance(value,(Decimal,int,float)): p.alignment=WD_ALIGN_PARAGRAPH.RIGHT
+                if isinstance(value,(Decimal,int,float,ReportNumber)): p.alignment=WD_ALIGN_PARAGRAPH.RIGHT
                 for r in p.runs:r.font.size=Pt(9)
     spacer=doc.add_paragraph();spacer.paragraph_format.space_after=Pt(2);spacer.paragraph_format.space_before=Pt(0)
     spacer.paragraph_format.line_spacing=Pt(3)
@@ -160,12 +162,12 @@ def append_result(doc, result, title=None):
         for r in items:
             p=doc.add_paragraph()
             p.add_run(r.date+' '+r.name+'  ').bold=True
-            p.add_run(r.formula+'\n'+r.reference)
-            if r.currency!='KRW':p.add_run(f'\n통화 {r.currency} / 외화금액 {r.foreign_amount} / 환율 {r.rate}')
-            if r.notes:p.add_run('\n'+r.notes)
+            p.add_run(report_text(r.formula)+'\n'+r.reference)
+            if r.currency!='KRW':p.add_run(f'\n통화 {r.currency} / 외화금액 {report_number(r.foreign_amount)} / 환율 {report_number(r.rate)}')
+            if r.notes:p.add_run('\n'+report_text(r.notes))
     doc.add_heading('5 지급 조정 및 예외',1)
     doc.add_paragraph('할인·기관부담·지원액은 해당 항목에서 차감합니다. 기지급액은 확정 인정액에서 한 번만 차감합니다. 미승인 추가지급액은 청구액에 포함하지 않습니다.')
-    for issue in result.issues:doc.add_paragraph(issue,style='Normal')
+    for issue in result.issues:doc.add_paragraph(report_text(issue),style='Normal')
     doc.add_heading('6 증빙 및 정산 확인',1)
     table(doc,['구분','내용'],[(p,v) for p,v in flatten(result.trip['evidence'],'증빙')],[5,12.6])
     table(doc,['정산 항목','신청 기한 및 근거'],[[r['항목'],r['기한']+' / '+r['근거']] for r in deadlines(result)],[5,12.6])

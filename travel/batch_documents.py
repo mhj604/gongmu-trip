@@ -6,7 +6,7 @@ from xml.etree import ElementTree as ET
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from .models import CATEGORIES, money
-from .report import flatten, deadlines
+from .report import formatted_flatten as flatten, deadlines, report_text
 from .excel import sheet, safe_value, MONEY, NAVY, shared_lodging_sheet, FONT
 from .word import new_document, append_result, table
 
@@ -60,10 +60,10 @@ def export_batch_excel(batch):
         for line in result.lines:
             detail.append([i,name,line.date,line.category,line.name,line.actual,line.amount,line.status])
             grounds.extend([f'{i}. {name} / {line.date} / {line.name}',label,value] for label,value in
-                [('계산식',line.formula),('근거',line.reference),('출처',line.source),('법령 버전',line.rule_version),('비고',line.notes)])
+                [('계산식',report_text(line.formula)),('근거',line.reference),('출처',line.source),('법령 버전',line.rule_version),('비고',report_text(line.notes))])
         raw.extend([i,name,path,value] for path,value in flatten(result.trip))
         raw.append([i,name,'적용 법령자료 버전',result.rule_snapshot['version']])
-        review.extend([i,name,'미확정 사유',issue] for issue in result.issues)
+        review.extend([i,name,'미확정 사유',report_text(issue)] for issue in result.issues)
         review.extend([i,name,'정산기한 / '+r['항목'],r['기한']+' / '+r['근거']] for r in deadlines(result))
     sheet(wb,'02_항목별_내역','출장별 항목과 금액',
           ['번호','출장명','일자','항목','내역','실제 지출액','인정금액','상태'],

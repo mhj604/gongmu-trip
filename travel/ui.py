@@ -381,12 +381,6 @@ def detail_fields(trip):
     st.caption('행 아래 +로 추가할 수 있습니다. 입력 후 Enter를 누르면 금액이 바로 반영됩니다.')
 
 
-@st.cache_data(show_spinner=False, max_entries=20)
-def documents(serialized, layout_version='공식서식-2026-11-18.2'):
-    result = Result.from_dict(json.loads(serialized))
-    return export_excel(result), export_word(result)
-
-
 def reset_batch(trips, results=None, identifier=None, title=''):
     for trip in trips:
         for name in list(st.session_state):
@@ -531,7 +525,20 @@ def render_result(trip, result, nights):
         st.caption('추가 여비 포함 '+money(sum((line.amount or ZERO for line in result.lines if line.category=='기타 인정 여비' and line.status != EXCLUDED),ZERO)))
 
 
-def result_details(store, trip, result, batch=None):
+def render_single_actions(store, trip, result):
+    save, excel, word = st.columns(3)
+    if save.button('계산 저장',type='primary',width='stretch'):
+        store.save(trip,result)
+        st.toast('저장했습니다.')
+    payload = dumps(result.to_dict())
+    excel.download_button('Excel 다운로드',lambda:export_excel(Result.from_dict(json.loads(payload))),
+        '출장비_계산서.xlsx',width='stretch',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    word.download_button('Word 다운로드',lambda:export_word(Result.from_dict(json.loads(payload))),
+        '출장비_계산서.docx',width='stretch',mime='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    st.caption('출력: [인사혁신처 공식 신청서](https://www.mpm.go.kr/mpm/info/resultPay/payBoard/?cntId=695&mode=view)와 별첨 계산 내역')
+
+
+def result_details(trip, result, batch=None):
     st.caption('예상액에는 승인·증빙 확인 전 금액도 포함됩니다. 확정 청구액 '+money(result.claim))
     render_line_details(result)
     for issue in result.issues:
@@ -540,13 +547,6 @@ def result_details(store, trip, result, batch=None):
         st.download_button('전체 입력 백업 (JSON)',dumps(batch.to_dict()),'출장비_일괄백업.json','application/json')
         st.caption('위쪽 전체 합계에서 일괄 저장·출력할 수 있습니다. 이 탭은 선택한 출장의 상세 계산입니다.')
         return
-    if st.button('계산 저장',type='primary'):
-        store.save(trip,result)
-        st.toast('저장했습니다.')
-    xlsx, docx = documents(dumps(result.to_dict()))
-    a, b = st.columns(2)
-    a.download_button('Excel 다운로드',xlsx,'출장비_계산서.xlsx',width='stretch',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    b.download_button('Word 다운로드',docx,'출장비_계산서.docx',width='stretch',mime='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
     st.download_button('입력 백업 (JSON)',dumps(result.to_dict()),'출장비_백업.json','application/json')
     st.caption('공무원 여비 규정 · 자료 기준일 '+load_rules()['as_of'])
 
@@ -616,7 +616,7 @@ def run():
     # 상세 설정을 처리한 결과를 위쪽 결과 영역에 채운다.
     result_area = st.container(border=True, key='result')
     with st.expander('상세 입력·정산'):
-        conditions, identity, reports = st.tabs(['조건 조정','정산 정보','저장·다운로드'])
+        conditions, identity, reports = st.tabs(['조건 조정','정산 정보','계산 내역'])
         with conditions:
             manual = st.toggle('날짜별로 다르게 입력',value=previous,key=key(trip,'manual'),
                                help='일부 날짜 숙박·다른 출장지·무료 식사·공무용 차량 사용일이 다르면 날짜별로 입력하세요. 해제하면 간편 입력 합계로 다시 계산합니다.')
@@ -678,8 +678,9 @@ def run():
             render_batch_result(store,batch)
         else:
             render_result(trip,result,nights)
+            render_single_actions(store,trip,result)
             if allocation(result):
                 with st.expander('숙박비 분담 내역'):
                     render_shared_lodging(result)
     with report_area:
-        result_details(store,trip,result,batch)
+        result_details(trip,result,batch)

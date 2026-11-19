@@ -1,6 +1,6 @@
 """openpyxl 기반 9개 시트 행정 정산서."""
 from io import BytesIO
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import date, datetime
 from math import ceil
 from unicodedata import east_asian_width
@@ -11,7 +11,7 @@ from openpyxl.styles import Font,PatternFill,Alignment,Border,Side
 from openpyxl.worksheet.page import PageMargins
 from openpyxl.formatting.rule import CellIsRule
 from .models import *
-from .report import flatten,metadata,deadlines,status_label
+from .report import formatted_flatten as flatten,metadata,deadlines,status_label,ReportNumber,report_text
 from .shared_lodging import allocation, SCOPE_NOTE
 
 NAVY='182F4D'
@@ -22,11 +22,19 @@ FONT='맑은 고딕'
 MONEY='#,##0"원";[Red](#,##0"원");0"원"'
 
 def safe_value(cell,value):
+    if isinstance(value,ReportNumber):
+        original=value
+        safe_value(cell,value.value)
+        if original.krw:cell.number_format=MONEY
+        return
     if value is None: cell.value='미입력'
     elif isinstance(value,Decimal): cell.value=int(value) if value==value.to_integral_value() else float(value)
     elif isinstance(value,(dict,list)): cell.value=dumps(value)
     else: cell.value=value
     if isinstance(cell.value,str): cell.data_type='s'
+    elif isinstance(value,(Decimal,int,float)) and not isinstance(value,bool):
+        rounded=Decimal(str(value)).quantize(Decimal('.01'),rounding=ROUND_HALF_UP)
+        cell.number_format='#,##0' if rounded==rounded.to_integral_value() else '#,##0.00'
 
 def sheet(wb,name,title,headers,rows,widths=None,currency_columns=()):
     ws=wb.create_sheet(name)
@@ -62,10 +70,9 @@ def sheet(wb,name,title,headers,rows,widths=None,currency_columns=()):
             safe_value(cell,val)
             cell.font=Font(name=FONT,size=10,color=INK)
             cell.fill=PatternFill('solid',fgColor='F5F8FA' if i%2==0 else 'FFFFFF')
-            cell.alignment=Alignment(vertical='center',wrap_text=True,horizontal='right' if isinstance(val,(int,float,Decimal)) else 'left',indent=1)
+            cell.alignment=Alignment(vertical='center',wrap_text=True,horizontal='right' if isinstance(val,(int,float,Decimal,ReportNumber)) else 'left',indent=1)
             cell.border=Border(bottom=Side(style='hair',color='DCE5EC'))
             if j in currency_columns and isinstance(val,(Decimal,int,float)): cell.number_format=MONEY
-            if headers[j-1] in ['환율','외화금액'] and isinstance(val,(Decimal,int,float)): cell.number_format='#,##0.0000'
             text=str(cell.value or '')
             width=widths[j-1]
             text_width=lambda s:sum(2 if east_asian_width(ch) in ('W','F') else 1 for ch in s)
@@ -156,10 +163,10 @@ def export_excel(result:Result)->bytes:
     grounds=[]
     for r in result.lines:
         grounds += [[r.date+' / '+r.name,label,value] for label,value in
-            [('계산식',r.formula),('적용 근거',r.reference),('법령·규칙 버전',r.rule_version),('출처',r.source),('비고',r.notes)]]
+            [('계산식',report_text(r.formula)),('적용 근거',r.reference),('법령·규칙 버전',r.rule_version),('출처',r.source),('비고',report_text(r.notes))]]
     sheet(wb,'08_계산_근거','적용 법령과 계산식',
         ['일자·항목','구분','내용'],grounds,[30,18,88])
-    review=[['계산 상태',s] for s in result.issues]
+    review=[['계산 상태',report_text(s)] for s in result.issues]
     review += [[f'정산기한 / {r["항목"]}',r['기한']+' / '+r['근거']] for r in deadlines(result)]
     review += [[p,v] for p,v in flatten(result.trip['evidence'],'증빙')]
     review += [[p,v] for p,v in flatten(result.trip['fx'],'환율')]
